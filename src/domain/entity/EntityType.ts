@@ -12,6 +12,8 @@ export const EntityTypeId = {
   Sheep: 3,
   Zombie: 4,
   Spider: 5,
+  /** Presentation-only avatar received from a multiplayer peer. */
+  RemotePlayer: 6,
 } as const;
 
 export type EntityTypeId = (typeof EntityTypeId)[keyof typeof EntityTypeId];
@@ -147,6 +149,14 @@ const DEFINITIONS: readonly EntityDefinition[] = Object.freeze([
     despawnsAtDawn: false,
     walkCycleScale: 5,
   }),
+  define(EntityTypeId.RemotePlayer, 'Player', Temperament.Passive, {
+    width: 0.6,
+    height: 1.8,
+    maxHealth: 20,
+    moveSpeed: 4.3,
+    groupMin: 0,
+    groupMax: 0,
+  }),
 ]);
 
 const FALLBACK = DEFINITIONS[EntityTypeId.Pig];
@@ -167,7 +177,10 @@ export const EntityRegistry = {
 
   /** Creature types eligible for a given spawn window. */
   spawnable(temperament: Temperament): readonly EntityDefinition[] {
-    return DEFINITIONS.filter((definition) => definition.temperament === temperament);
+    return DEFINITIONS.filter(
+      (definition) =>
+        definition.id !== EntityTypeId.RemotePlayer && definition.temperament === temperament,
+    );
   },
 } as const;
 

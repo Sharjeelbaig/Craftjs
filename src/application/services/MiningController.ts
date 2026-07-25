@@ -1,4 +1,4 @@
-import { BlockRegistry } from '@domain/world/BlockType';
+import { BlockRegistry, type BlockId } from '@domain/world/BlockType';
 import type { RaycastHit } from '@domain/physics/VoxelRaycaster';
 import type { Player } from '@domain/player/Player';
 import type { WorldEditor } from './WorldEditor';
@@ -35,27 +35,27 @@ export class MiningController {
    * Advances mining by one tick.
    *
    * @param held True while the primary button is down.
-   * @returns True when a block was broken this tick.
+   * @returns The block type broken this tick, or null.
    */
-  update(player: Player, target: RaycastHit | null, held: boolean, dt: number): boolean {
+  update(player: Player, target: RaycastHit | null, held: boolean, dt: number): BlockId | null {
     if (this.cooldown > 0) this.cooldown = Math.max(0, this.cooldown - dt);
 
     if (!held || target === null || player.isDead) {
       this.reset();
-      return false;
+      return null;
     }
 
     const definition = BlockRegistry.get(target.block);
     if (definition.indestructible) {
       this.reset();
-      return false;
+      return null;
     }
 
     if (player.rules.instantMining) {
       this.reset();
-      if (this.cooldown > 0) return false;
+      if (this.cooldown > 0) return null;
       this.cooldown = CREATIVE_REPEAT_SECONDS;
-      return this.editor.breakBlock(player).ok;
+      return this.editor.breakBlock(player).ok ? (target.block as BlockId) : null;
     }
 
     const key = `${target.x},${target.y},${target.z}`;
@@ -68,14 +68,14 @@ export class MiningController {
     const hardness = definition.hardness;
     if (!Number.isFinite(hardness) || hardness <= 0) {
       this.reset();
-      return this.editor.breakBlock(player).ok;
+      return this.editor.breakBlock(player).ok ? (target.block as BlockId) : null;
     }
 
     this.progress += dt / hardness;
-    if (this.progress < 1) return false;
+    if (this.progress < 1) return null;
 
     this.reset();
-    return this.editor.breakBlock(player).ok;
+    return this.editor.breakBlock(player).ok ? (target.block as BlockId) : null;
   }
 
   /** Clears progress; call when the player dies, respawns or changes mode. */

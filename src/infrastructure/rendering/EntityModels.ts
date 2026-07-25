@@ -162,6 +162,9 @@ const ZOMBIE_SHIRT = 0x3a5f8a;
 const ZOMBIE_LEGS = 0x38416b;
 const SPIDER_BODY = 0x2b2320;
 const SPIDER_EYES = 0xa8202a;
+const PLAYER_SKIN = 0xd9a06c;
+const PLAYER_SHIRT = 0x4c92c3;
+const PLAYER_LEGS = 0x313b55;
 
 const MODELS: Readonly<Record<EntityTypeId, EntityModel>> = Object.freeze({
   [EntityTypeId.Pig]: Object.freeze({
@@ -273,6 +276,47 @@ const MODELS: Readonly<Record<EntityTypeId, EntityModel>> = Object.freeze({
       part({ size: [2, 2, 1], pivot: [-2, 11, -12], role: AnimationRole.Head, colour: SPIDER_EYES }),
       part({ size: [2, 2, 1], pivot: [2, 11, -12], role: AnimationRole.Head, colour: SPIDER_EYES }),
       ...spiderLegs(0x231d1a),
+    ]),
+  }),
+
+  [EntityTypeId.RemotePlayer]: Object.freeze({
+    swingAmplitude: 0.72,
+    parts: Object.freeze([
+      part({ size: [8, 12, 4], pivot: [0, 18, 0], colour: PLAYER_SHIRT }),
+      part({
+        size: [8, 8, 8],
+        pivot: [0, 28, 0],
+        role: AnimationRole.Head,
+        colour: PLAYER_SKIN,
+      }),
+      part({
+        size: [4, 12, 4],
+        pivot: [-6, 23, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbB,
+        colour: PLAYER_SKIN,
+      }),
+      part({
+        size: [4, 12, 4],
+        pivot: [6, 23, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbA,
+        colour: PLAYER_SKIN,
+      }),
+      part({
+        size: [4, 12, 4],
+        pivot: [-2, 12, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbA,
+        colour: PLAYER_LEGS,
+      }),
+      part({
+        size: [4, 12, 4],
+        pivot: [2, 12, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbB,
+        colour: PLAYER_LEGS,
+      }),
     ]),
   }),
 });

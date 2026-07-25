@@ -86,6 +86,21 @@ export class WorldEditor {
     return this.write(x, y, z, block);
   }
 
+  /** Applies a validated edit received from a trusted application boundary. */
+  applyBlockEdit(x: number, y: number, z: number, block: BlockId): EditResult {
+    if (
+      !Number.isInteger(x) ||
+      !Number.isInteger(y) ||
+      !Number.isInteger(z) ||
+      y < WORLD_MIN_Y ||
+      y > WORLD_MAX_Y ||
+      !BlockRegistry.isKnown(block)
+    ) {
+      return { ok: false, reason: EditRejection.OutOfBounds };
+    }
+    return this.write(x, y, z, block);
+  }
+
   private write(x: number, y: number, z: number, block: number): EditResult {
     const change = this.world.setBlock(x, y, z, block);
     if (change === null) return { ok: false, reason: EditRejection.NotLoaded };

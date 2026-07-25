@@ -33,6 +33,12 @@ export interface SkyState {
   readonly light: number;
   /** Height of the sun in [-1, 1]; drives sky colour. */
   readonly sunHeight: number;
+  /** Additional dimming caused by rain or storms, in [0, 1]. */
+  readonly weatherDarkening?: number;
+  /** Pulls fog closer during poor weather. */
+  readonly fogMultiplier?: number;
+  /** World-space rain field strength; zero disables precipitation geometry. */
+  readonly precipitation?: number;
 }
 
 export interface RenderStats {
@@ -68,6 +74,9 @@ export interface GameRenderer {
 
   /** Applies time-of-day lighting and sky colour. */
   setSky(sky: SkyState): void;
+
+  /** Optional terrain sampler used to stop world rain at roofs and ground. */
+  setRainSurfaceSampler?(sampler: (x: number, z: number) => number | null): void;
 
   setRenderDistance(chunks: number): void;
 

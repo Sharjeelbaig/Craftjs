@@ -10,18 +10,21 @@ npm install
 npm run dev
 ```
 
-Open the printed URL, click to play.
+Open the printed URL, choose a seed and mode in the start menu, then click to play.
 
 | Script | Purpose |
 | --- | --- |
 | `npm run dev` | Development server with hot reload |
 | `npm run build` | Typecheck, then emit a static bundle to `dist/` |
 | `npm run preview` | Serve the production bundle locally |
+| `npm run serve` | Serve `dist/` with the optional multiplayer relay |
 | `npm test` | Run the test suite |
 | `npm run typecheck` | Typecheck without emitting |
 
-`dist/` is a fully static site — no server, no runtime dependencies, no
-external asset requests. Textures are generated procedurally at start-up.
+`dist/` is a fully static single-player site — no server and no external asset
+requests. Textures are generated procedurally at start-up. Multiplayer is
+optional: `npm run dev` includes a room relay for development, while
+`npm run build && npm run serve` serves the production bundle and relay together.
 
 ## Controls
 
@@ -35,12 +38,25 @@ external asset requests. Textures are generated procedurally at start-up.
 | Break block | Left click |
 | Place block | Right click |
 | Select block | `1`–`9`, mouse wheel |
+| Inventory / quick crafting | `E` |
 | Debug overlay | `F3` |
 | Pause | `Esc` |
 
 Query parameters: `?seed=<number|text>` picks a world, `?distance=<2–16>` sets
 render distance. Each seed is a separate save — switching between them keeps
 both intact. With no `?seed`, the last world played is reopened.
+
+## Gameplay baseline
+
+- Survival inventory: mined blocks are collected, placement consumes one, and
+  four small recipes cover planks, cobblestone, bricks and glass.
+- Creative inventory: every buildable block and six mob spawn eggs are
+  available from `E`; click an item to equip the selected hotbar slot.
+- The day/night cycle, weather and inventory are saved with the world.
+- Rain is one depth-tested world-space line field, not a screen overlay. It has
+  perspective and parallax while staying bounded to one draw call.
+- Multiplayer rooms sync player presence and block edits. They intentionally do
+  not add accounts, chat, PvP or a permanent authoritative world server.
 
 ## Architecture
 
@@ -56,6 +72,7 @@ src/
 │   ├── generation/    Deterministic noise and terrain synthesis
 │   ├── physics/       AABB collision resolution, voxel raycasting
 │   ├── player/        Player entity, intent, movement rules
+│   ├── inventory/     Items, bounded inventory, atomic recipes
 │   └── shared/        Value objects
 ├── application/       Use cases and ports. Depends only on domain.
 │   ├── ports/         Interfaces the outside world must satisfy
@@ -64,6 +81,7 @@ src/
 │   └── Game.ts        Composition root and frame orchestration
 ├── infrastructure/    Adapters. Depends on application + domain.
 │   ├── rendering/     Three.js renderer, procedural texture array, shaders
+│   ├── network/       Optional reconnecting WebSocket room adapter
 │   ├── meshing/       Greedy-free culled mesher, worker pool
 │   ├── input/         Keyboard + pointer-lock adapter
 │   └── persistence/   IndexedDB and in-memory repositories
@@ -132,7 +150,7 @@ costs a single multiply and is independent of how many chunks are on screen.
 
 ## Testing
 
-124 tests covering the parts where correctness is not obvious by inspection:
+154 tests covering the parts where correctness is not obvious by inspection:
 
 - **Collision** — landing, sliding, ceilings, tunnelling at any speed, and an
   invariant sweep asserting the player never ends a step inside geometry.

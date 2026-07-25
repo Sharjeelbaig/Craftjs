@@ -10,6 +10,8 @@ import { IndexedDbWorldRepository } from '@infrastructure/persistence/IndexedDbW
 import { InMemoryWorldRepository } from '@infrastructure/persistence/InMemoryWorldRepository';
 import { ThreeRenderer } from '@infrastructure/rendering/ThreeRenderer';
 import { Hud } from '@presentation/Hud';
+import { StartMenu } from '@presentation/StartMenu';
+import { WebSocketMultiplayerSession } from '@infrastructure/network/WebSocketMultiplayerSession';
 
 /**
  * Application entry point.
@@ -114,15 +116,20 @@ function showFatalError(message: string, detail: string): void {
 }
 
 async function bootstrap(): Promise<void> {
+  const app = document.getElementById('app');
   const canvas = document.getElementById('viewport');
   const hudRoot = document.getElementById('hud');
 
-  if (!(canvas instanceof HTMLCanvasElement) || hudRoot === null) {
+  if (!(canvas instanceof HTMLCanvasElement) || hudRoot === null || app === null) {
     showFatalError('Craftjs could not start', 'The page markup is missing required elements.');
     return;
   }
 
-  const seed = resolveSeed();
+  const launch = await StartMenu.show(app, {
+    seed: resolveSeed(),
+    gameMode: gameModeFromQuery() ?? GameMode.Survival,
+  });
+  const seed = launch.seed;
   const { repository, durable } = await createPersistence(seed);
   if (durable) writeSetting(LAST_SEED_KEY, String(seed));
   const renderDistance = renderDistanceFromQuery();
@@ -142,6 +149,14 @@ async function bootstrap(): Promise<void> {
 
   const input = new BrowserInput(canvas);
   const mesher = new WorkerChunkMesher();
+  const multiplayer =
+    launch.multiplayer === null
+      ? undefined
+      : new WebSocketMultiplayerSession(
+          launch.multiplayer.serverUrl,
+          `${seed}:${launch.multiplayer.room}`,
+          launch.multiplayer.name,
+        );
 
   const game = new Game({
     renderer,
@@ -150,7 +165,8 @@ async function bootstrap(): Promise<void> {
     repository,
     durablePersistence: durable,
     seed,
-    gameMode: gameModeFromQuery(),
+    gameMode: launch.gameMode,
+    multiplayer,
     streaming: { renderDistance },
   });
 
@@ -164,6 +180,9 @@ async function bootstrap(): Promise<void> {
   });
 
   game.onSlotChange((slot) => input.syncSlot(slot));
+  game.onInventoryToggle((open) => {
+    if (open) input.releaseCapture();
+  });
 
   if (!durable) {
     hud.showMessage('Storage unavailable — this world will not be saved', 6000);

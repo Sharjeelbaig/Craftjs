@@ -1,5 +1,6 @@
 import { Vec3, clamp } from '../shared/Vec3';
 import type { EntitySize } from '../physics/CollisionResolver';
+import { Inventory, type InventorySnapshot } from '../inventory/Inventory';
 import { GameMode, parseGameMode, rulesFor, type GameModeRules } from './GameMode';
 
 /** Collision dimensions, in blocks. */
@@ -48,6 +49,8 @@ export interface PlayerSnapshot {
   readonly spawnX?: number;
   readonly spawnY?: number;
   readonly spawnZ?: number;
+  /** Optional so worlds saved before inventories were introduced still load. */
+  readonly inventory?: InventorySnapshot;
 }
 
 /**
@@ -78,6 +81,7 @@ export class Player {
   inLiquid = false;
   mode: MovementMode = MovementMode.Walking;
   selectedSlot = 0;
+  inventory = new Inventory();
 
   gameMode: GameMode = GameMode.Survival;
   health = PLAYER_MAX_HEALTH;
@@ -119,6 +123,10 @@ export class Player {
     player.mode = snapshot.mode === MovementMode.Flying ? MovementMode.Flying : MovementMode.Walking;
     player.selectedSlot = snapshot.selectedSlot;
     player.gameMode = parseGameMode(snapshot.gameMode);
+    player.inventory =
+      snapshot.inventory === undefined && player.gameMode === GameMode.Creative
+        ? Inventory.creativeLoadout()
+        : Inventory.fromSnapshot(snapshot.inventory);
 
     // Health may be absent (older save) or nonsense (hand-edited); clamp into
     // a playable range rather than starting the session already dead.
@@ -158,6 +166,7 @@ export class Player {
       spawnX: this.spawnX,
       spawnY: this.spawnY,
       spawnZ: this.spawnZ,
+      inventory: this.inventory.toSnapshot(),
     };
   }
 
@@ -177,6 +186,14 @@ export class Player {
     if (!this.rules.takesDamage) {
       this.health = this.maxHealth;
       this.hurtTimer = 0;
+      // Old survival worlds can enter creative without being left with an
+      // empty hotbar. Existing player choices are preserved where present.
+      const creative = Inventory.creativeLoadout();
+      for (let index = 0; index < this.inventory.hotbar.length; index++) {
+        if (this.inventory.hotbar[index] === null) {
+          this.inventory.hotbar[index] = creative.hotbar[index];
+        }
+      }
     }
     this.fallDistance = 0;
   }

@@ -13,6 +13,7 @@ import { CHUNK_SIZE } from '@domain/world/WorldConstants';
 import { createBlockTextureArray } from './TextureAtlas';
 import { createVoxelMaterials, type VoxelMaterials } from './VoxelMaterial';
 import { EntityLayer } from './EntityLayer';
+import { WorldRain } from './WorldRain';
 
 /** Sky palette, interpolated across the day by sun height. */
 const DAY_SKY = new THREE.Color(0x8fc4ea);
@@ -48,6 +49,7 @@ export class ThreeRenderer implements GameRenderer {
   private readonly atlas: THREE.DataArrayTexture;
   private readonly highlight: THREE.LineSegments;
   private readonly entityLayer: EntityLayer;
+  private readonly rain: WorldRain;
   private readonly chunks = new Map<string, ChunkMeshes>();
 
   private readonly resizeObserver: ResizeObserver | null = null;
@@ -57,6 +59,8 @@ export class ThreeRenderer implements GameRenderer {
   private readonly skyColor = DAY_SKY.clone();
   private daylight = 1;
   private sunHeight = 1;
+  private weatherDarkening = 0;
+  private fogMultiplier = 1;
 
   private renderDistance = 8;
   private submerged = false;
@@ -100,6 +104,7 @@ export class ThreeRenderer implements GameRenderer {
     this.scene.add(this.highlight);
 
     this.entityLayer = new EntityLayer(this.scene, this.skyColor, this.fogNear, this.fogFar);
+    this.rain = new WorldRain(this.scene);
 
     this.applyViewDistance();
 
@@ -120,11 +125,14 @@ export class ThreeRenderer implements GameRenderer {
   }
 
   private get fogNear(): number {
-    return this.viewDistance * 0.55;
+    return this.viewDistance * 0.55 * this.fogMultiplier;
   }
 
   private get fogFar(): number {
-    return Math.max(this.fogNear + 1, this.viewDistance - CHUNK_SIZE * 0.5);
+    return Math.max(
+      this.fogNear + 1,
+      (this.viewDistance - CHUNK_SIZE * 0.5) * this.fogMultiplier,
+    );
   }
 
   setRenderDistance(chunks: number): void {
@@ -132,6 +140,10 @@ export class ThreeRenderer implements GameRenderer {
     if (next === this.renderDistance) return;
     this.renderDistance = next;
     this.applyViewDistance();
+  }
+
+  setRainSurfaceSampler(sampler: (x: number, z: number) => number | null): void {
+    this.rain.setSurfaceSampler(sampler);
   }
 
   private applyViewDistance(): void {
@@ -147,17 +159,27 @@ export class ThreeRenderer implements GameRenderer {
    * can never disagree — a bright sky over dark terrain is not representable.
    */
   setSky(sky: SkyState): void {
-    const light = clamp01(sky.light);
+    const darkening = clamp01(sky.weatherDarkening ?? 0);
+    const fogMultiplier = Math.max(0.35, Math.min(1, sky.fogMultiplier ?? 1));
+    const light = clamp01(sky.light * (1 - darkening));
     const height = Number.isFinite(sky.sunHeight) ? sky.sunHeight : 1;
 
     // Sun height changes continuously; skip the colour work unless it moved
     // enough to be visible, which is most frames.
-    if (Math.abs(height - this.sunHeight) < 0.002 && Math.abs(light - this.daylight) < 0.002) {
+    if (
+      Math.abs(height - this.sunHeight) < 0.002 &&
+      Math.abs(light - this.daylight) < 0.002 &&
+      Math.abs(darkening - this.weatherDarkening) < 0.002 &&
+      Math.abs(fogMultiplier - this.fogMultiplier) < 0.002
+    ) {
       return;
     }
 
     this.daylight = light;
     this.sunHeight = height;
+    this.weatherDarkening = darkening;
+    this.fogMultiplier = fogMultiplier;
+    this.rain.setStrength(Math.max(0, Math.min(1, sky.precipitation ?? 0)));
 
     this.materials.setDaylight(light);
     this.entityLayer.setDaylight(light);
@@ -170,6 +192,7 @@ export class ThreeRenderer implements GameRenderer {
     } else {
       this.skyColor.copy(NIGHT_SKY).lerp(DUSK_SKY, clamp01((height + 0.35) / 0.3));
     }
+    this.skyColor.lerp(NIGHT_SKY, darkening * 0.72);
 
     this.applyAtmosphere();
   }
@@ -259,6 +282,7 @@ export class ThreeRenderer implements GameRenderer {
 
     this.camera.position.set(camera.position.x, camera.position.y, camera.position.z);
     this.camera.rotation.set(camera.pitch, camera.yaw, 0);
+    this.rain.update(camera.position, performance.now() / 1000);
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -289,6 +313,7 @@ export class ThreeRenderer implements GameRenderer {
     this.chunks.clear();
 
     this.entityLayer.dispose();
+    this.rain.dispose();
     this.highlight.geometry.dispose();
     (this.highlight.material as THREE.Material).dispose();
     this.scene.clear();

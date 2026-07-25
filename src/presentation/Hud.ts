@@ -1,6 +1,18 @@
-import type { Game, GameDebugInfo, PlayerStatus } from '@application/Game';
+import type {
+  Game,
+  GameDebugInfo,
+  InventoryView,
+  PlayerStatus,
+  WorldStatus,
+} from '@application/Game';
 import { GameMode } from '@domain/player/GameMode';
-import { BlockRegistry, HOTBAR_BLOCKS } from '@domain/world/BlockType';
+import { HOTBAR_SIZE } from '@domain/inventory/Inventory';
+import {
+  CREATIVE_BLOCK_ITEMS,
+  CREATIVE_EGG_ITEMS,
+  itemDefinition,
+  type ItemId,
+} from '@domain/inventory/Item';
 
 /** Debug overlay refresh interval — faster just makes the numbers unreadable. */
 const DEBUG_REFRESH_MS = 200;
@@ -24,6 +36,9 @@ export class Hud {
   private readonly deathOverlay: HTMLElement;
   private readonly debugPanel: HTMLElement;
   private readonly hotbar: HTMLElement;
+  private readonly inventoryOverlay: HTMLElement;
+  private readonly inventoryBody: HTMLElement;
+  private readonly worldBadge: HTMLElement;
   private readonly slots: HTMLElement[] = [];
   private readonly hearts: HTMLElement[] = [];
   private readonly healthBar: HTMLElement;
@@ -34,7 +49,10 @@ export class Hud {
   private debugTimer: ReturnType<typeof setInterval> | null = null;
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private flashTimer: ReturnType<typeof setTimeout> | null = null;
+  private worldTimer: ReturnType<typeof setInterval> | null = null;
   private lastHealth = Number.NaN;
+  private paused = true;
+  private inventoryVisible = false;
   private readonly unsubscribes: (() => void)[] = [];
 
   constructor(root: HTMLElement, game: Game) {
@@ -45,6 +63,8 @@ export class Hud {
     this.deathOverlay = this.createDeathOverlay();
     this.debugPanel = this.createDebugPanel();
     this.hotbar = this.createHotbar();
+    [this.inventoryOverlay, this.inventoryBody] = this.createInventoryOverlay();
+    this.worldBadge = this.createWorldBadge();
     this.healthBar = this.createHealthBar();
     this.modeBadge = this.createModeBadge();
     this.toast = this.createToast();
@@ -56,8 +76,10 @@ export class Hud {
       this.healthBar,
       this.hotbar,
       this.modeBadge,
+      this.worldBadge,
       this.debugPanel,
       this.overlay,
+      this.inventoryOverlay,
       this.deathOverlay,
       this.toast,
     );
@@ -67,6 +89,9 @@ export class Hud {
       game.onSlotChange((slot) => this.setSelectedSlot(slot)),
       game.onStatusChange((status) => this.setStatus(status)),
       game.onNotice((message) => this.showMessage(message)),
+      game.onInventoryChange(() => this.renderInventory()),
+      game.onInventoryToggle((open) => this.setInventoryOpen(open)),
+      game.onWorldStatusChange((status) => this.setWorldStatus(status)),
     );
 
     this.setSelectedSlot(game.player.selectedSlot);
@@ -76,13 +101,25 @@ export class Hud {
       gameMode: game.player.gameMode,
       dead: game.player.isDead,
     });
+    this.renderInventory();
+    this.setWorldStatus(game.worldStatus());
+    this.worldTimer = globalThis.setInterval(() => this.setWorldStatus(game.worldStatus()), 1000);
   }
 
   /** Shows the click-to-play overlay when input capture is lost. */
   setPaused(paused: boolean): void {
+    this.paused = paused;
     // The death screen owns the view while it is up.
-    const showPause = paused && this.deathOverlay.classList.contains('is-hidden');
+    const showPause =
+      paused && !this.inventoryVisible && this.deathOverlay.classList.contains('is-hidden');
     this.overlay.classList.toggle('is-hidden', !showPause);
+  }
+
+  setInventoryOpen(open: boolean): void {
+    this.inventoryVisible = open;
+    this.inventoryOverlay.classList.toggle('is-hidden', !open);
+    this.overlay.classList.toggle('is-hidden', open || !this.paused);
+    if (open) this.renderInventory();
   }
 
   setDebugVisible(visible: boolean): void {
@@ -137,6 +174,7 @@ export class Hud {
     if (this.debugTimer !== null) globalThis.clearInterval(this.debugTimer);
     if (this.toastTimer !== null) globalThis.clearTimeout(this.toastTimer);
     if (this.flashTimer !== null) globalThis.clearTimeout(this.flashTimer);
+    if (this.worldTimer !== null) globalThis.clearInterval(this.worldTimer);
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
     this.root.replaceChildren();
@@ -155,10 +193,9 @@ export class Hud {
     const bar = document.createElement('div');
     bar.className = 'hotbar';
 
-    HOTBAR_BLOCKS.forEach((block, index) => {
+    for (let index = 0; index < HOTBAR_SIZE; index++) {
       const slot = document.createElement('div');
       slot.className = 'hotbar__slot';
-      slot.title = BlockRegistry.get(block).name;
 
       const key = document.createElement('span');
       key.className = 'hotbar__key';
@@ -166,14 +203,33 @@ export class Hud {
 
       const label = document.createElement('span');
       label.className = 'hotbar__label';
-      label.textContent = BlockRegistry.get(block).name;
+      label.textContent = 'Empty';
 
-      slot.append(key, label);
+      const count = document.createElement('span');
+      count.className = 'hotbar__count';
+
+      slot.append(key, label, count);
       this.slots.push(slot);
       bar.append(slot);
-    });
+    }
 
     return bar;
+  }
+
+  private renderHotbar(view: InventoryView): void {
+    this.slots.forEach((slot, index) => {
+      const item = view.hotbar[index];
+      const label = slot.querySelector<HTMLElement>('.hotbar__label');
+      const count = slot.querySelector<HTMLElement>('.hotbar__count');
+      slot.title = item?.name ?? 'Empty';
+      if (label !== null) label.textContent = item?.name ?? 'Empty';
+      if (count !== null) {
+        count.textContent =
+          item === null || view.creative || item.count <= 0 ? '' : String(item.count);
+      }
+      slot.classList.toggle('is-empty', item === null);
+    });
+    this.setSelectedSlot(view.selectedSlot);
   }
 
   private createHealthBar(): HTMLElement {
@@ -226,13 +282,107 @@ export class Hud {
     }, 220);
   }
 
+  private createInventoryOverlay(): [HTMLElement, HTMLElement] {
+    const overlay = document.createElement('div');
+    overlay.className = 'inventory-overlay is-hidden';
+
+    const panel = document.createElement('section');
+    panel.className = 'inventory-panel';
+    panel.setAttribute('aria-label', 'Inventory and crafting');
+
+    const header = document.createElement('header');
+    header.className = 'inventory-panel__header';
+    const title = document.createElement('h2');
+    title.textContent = 'Inventory';
+    const hint = document.createElement('span');
+    hint.textContent = 'E to close · click an item to equip it';
+    header.append(title, hint);
+
+    const body = document.createElement('div');
+    body.className = 'inventory-panel__body';
+    panel.append(header, body);
+    overlay.append(panel);
+    return [overlay, body];
+  }
+
+  private renderInventory(): void {
+    const view = this.game.inventoryView();
+    this.renderHotbar(view);
+    this.inventoryBody.replaceChildren();
+
+    const itemHeading = document.createElement('h3');
+    itemHeading.textContent = view.creative ? 'Creative catalogue' : 'Collected blocks';
+    const itemGrid = document.createElement('div');
+    itemGrid.className = 'inventory-grid';
+
+    if (view.creative) {
+      for (const item of [...CREATIVE_BLOCK_ITEMS, ...CREATIVE_EGG_ITEMS]) {
+        itemGrid.append(this.createItemButton(item, Infinity));
+      }
+    } else if (view.items.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'inventory-empty';
+      empty.textContent = 'Mine blocks to collect them.';
+      itemGrid.append(empty);
+    } else {
+      for (const item of view.items) itemGrid.append(this.createItemButton(item.id, item.count));
+    }
+
+    const craftingHeading = document.createElement('h3');
+    craftingHeading.textContent = 'Quick crafting';
+    const recipes = document.createElement('div');
+    recipes.className = 'recipe-grid';
+    for (const recipe of view.recipes) {
+      const button = document.createElement('button');
+      button.className = 'recipe';
+      button.type = 'button';
+      button.disabled = !recipe.available;
+      const name = document.createElement('strong');
+      name.textContent = recipe.name;
+      const detail = document.createElement('span');
+      detail.textContent = recipe.detail;
+      button.append(name, detail);
+      button.addEventListener('click', () => this.game.craftRecipe(recipe.id));
+      recipes.append(button);
+    }
+
+    this.inventoryBody.append(itemHeading, itemGrid, craftingHeading, recipes);
+  }
+
+  private createItemButton(item: ItemId, count: number): HTMLButtonElement {
+    const definition = itemDefinition(item);
+    const button = document.createElement('button');
+    button.className = `inventory-item inventory-item--${definition?.kind ?? 'unknown'}`;
+    button.type = 'button';
+    button.title = 'Equip in the selected hotbar slot';
+    const name = document.createElement('span');
+    name.textContent = definition?.name ?? 'Unknown item';
+    const quantity = document.createElement('b');
+    quantity.textContent = Number.isFinite(count) ? String(count) : '∞';
+    button.append(name, quantity);
+    button.addEventListener('click', () => this.game.assignHotbar(item));
+    return button;
+  }
+
+  private createWorldBadge(): HTMLElement {
+    const badge = document.createElement('div');
+    badge.className = 'world-badge';
+    return badge;
+  }
+
+  private setWorldStatus(status: WorldStatus): void {
+    const period = status.isNight ? 'Night' : 'Day';
+    const weather = status.weather[0].toUpperCase() + status.weather.slice(1);
+    this.worldBadge.textContent = `${status.time} · ${period} · ${weather}`;
+  }
+
   private createPauseOverlay(): HTMLElement {
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
     overlay.innerHTML = `
       <div class="overlay__panel">
         <h1 class="overlay__title">Craft<span>js</span></h1>
-        <p class="overlay__hint">Click to play</p>
+        <p class="overlay__hint">Click anywhere to resume</p>
         <dl class="controls">
           <div><dt>Move</dt><dd>W A S D</dd></div>
           <div><dt>Jump / Ascend</dt><dd>Space</dd></div>
@@ -241,6 +391,7 @@ export class Hud {
           <div><dt>Mine / Attack</dt><dd>Hold left click</dd></div>
           <div><dt>Place block</dt><dd>Right click</dd></div>
           <div><dt>Select block</dt><dd>1 – 9 / Scroll</dd></div>
+          <div><dt>Inventory / Crafting</dt><dd>E</dd></div>
           <div><dt>Survival / Creative</dt><dd>G</dd></div>
           <div><dt>Toggle flight</dt><dd>F <span class="muted">(creative)</span></dd></div>
           <div><dt>Debug info</dt><dd>F3</dd></div>

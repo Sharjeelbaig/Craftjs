@@ -1,8 +1,9 @@
 import { TerrainGenerator } from '@domain/generation/TerrainGenerator';
-import { BlockRegistry, HOTBAR_BLOCKS, type BlockId } from '@domain/world/BlockType';
+import { BlockId, BlockRegistry, HOTBAR_BLOCKS } from '@domain/world/BlockType';
 import { ChunkCoord } from '@domain/world/ChunkCoord';
 import { World } from '@domain/world/World';
 import { TimeOfDay } from '@domain/world/TimeOfDay';
+import { Weather, type WeatherKind } from '@domain/world/Weather';
 import { CHUNK_SIZE, SEA_LEVEL } from '@domain/world/WorldConstants';
 import {
   MovementMode,
@@ -12,13 +13,21 @@ import {
   type PlayerSnapshot,
 } from '@domain/player/Player';
 import { GameMode, parseGameMode } from '@domain/player/GameMode';
+import { Inventory } from '@domain/inventory/Inventory';
+import { RECIPES, canCraft, craft } from '@domain/inventory/Crafting';
+import {
+  blockItem,
+  itemDefinition,
+  type ItemDefinition,
+  type ItemId,
+} from '@domain/inventory/Item';
 import { PlayerMovement } from '@domain/player/PlayerMovement';
 import { isPositionObstructed } from '@domain/physics/CollisionResolver';
 import type { RaycastHit } from '@domain/physics/VoxelRaycaster';
 
 import { GameLoop, browserClock, type GameLoopHandlers, type LoopClock } from './GameLoop';
 import { ChunkStreamer, type StreamingSettings } from './services/ChunkStreamer';
-import { WorldEditor } from './services/WorldEditor';
+import { EditRejection, WorldEditor } from './services/WorldEditor';
 import { EntityManager } from './services/EntityManager';
 import { CombatService } from './services/CombatService';
 import { MiningController } from './services/MiningController';
@@ -28,9 +37,12 @@ import type { ChunkMesher } from './ports/ChunkMesher';
 import type { GameRenderer } from './ports/GameRenderer';
 import { InputAction, type InputSource } from './ports/InputSource';
 import type { WorldRepository } from './ports/WorldRepository';
+import type { BlockEditMessage, MultiplayerSession } from './ports/MultiplayerSession';
+import { EntityTypeId } from '@domain/entity/EntityType';
+import type { EntityView } from './ports/GameRenderer';
 
 /** Save format version, bumped when stored records change shape. */
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 
 const AUTOSAVE_INTERVAL_SECONDS = 20;
 
@@ -73,12 +85,47 @@ export interface GameDebugInfo {
   readonly persistence: 'durable' | 'memory';
 }
 
+function stablePeerId(id: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < id.length; index++) {
+    hash ^= id.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return -(Math.abs(hash | 0) + 1);
+}
+
 /** State the HUD mirrors; emitted only when a value actually changes. */
 export interface PlayerStatus {
   readonly health: number;
   readonly maxHealth: number;
   readonly gameMode: GameMode;
   readonly dead: boolean;
+}
+
+export interface InventoryView {
+  readonly creative: boolean;
+  readonly selectedSlot: number;
+  readonly hotbar: readonly (ItemView | null)[];
+  readonly items: readonly ItemView[];
+  readonly recipes: readonly {
+    id: string;
+    name: string;
+    available: boolean;
+    detail: string;
+  }[];
+}
+
+export interface ItemView {
+  readonly id: ItemId;
+  readonly name: string;
+  readonly kind: ItemDefinition['kind'];
+  readonly count: number;
+}
+
+export interface WorldStatus {
+  readonly time: string;
+  readonly isNight: boolean;
+  readonly weather: WeatherKind;
 }
 
 export interface GameOptions {
@@ -101,6 +148,8 @@ export interface GameOptions {
   readonly adaptiveQuality?: boolean;
   /** Starting point of the day/night cycle, in [0, 1). */
   readonly startTime?: number;
+  /** Optional realtime room. Omit for the zero-dependency single-player path. */
+  readonly multiplayer?: MultiplayerSession;
 }
 
 /**
@@ -115,6 +164,7 @@ export class Game {
   readonly world = new World();
   readonly player: Player;
   readonly time: TimeOfDay;
+  readonly weather: Weather;
 
   private readonly generator: TerrainGenerator;
   private readonly movement = new PlayerMovement();
@@ -130,6 +180,7 @@ export class Game {
   private readonly input: InputSource;
   private readonly mesher: ChunkMesher;
   private readonly repository: WorldRepository;
+  private readonly multiplayer: MultiplayerSession | null;
   private readonly durablePersistence: boolean;
   private readonly onError: (error: unknown, context: string) => void;
 
@@ -148,12 +199,19 @@ export class Game {
   private readonly slotListeners = new Set<(slot: number) => void>();
   private readonly statusListeners = new Set<(status: PlayerStatus) => void>();
   private readonly noticeListeners = new Set<(message: string) => void>();
+  private readonly inventoryListeners = new Set<() => void>();
+  private readonly inventoryToggleListeners = new Set<(open: boolean) => void>();
+  private readonly worldStatusListeners = new Set<(status: WorldStatus) => void>();
+  private inventoryOpen = false;
+  private readonly networkViews: EntityView[] = [];
+  private readonly pendingNetworkEdits = new Map<string, BlockEditMessage>();
 
   constructor(options: GameOptions) {
     this.renderer = options.renderer;
     this.input = options.input;
     this.mesher = options.mesher;
     this.repository = options.repository;
+    this.multiplayer = options.multiplayer ?? null;
     this.durablePersistence = options.durablePersistence;
     this.onError =
       options.onError ??
@@ -166,9 +224,13 @@ export class Game {
     this.seed = (options.seed ?? 0) | 0;
     this.generator = new TerrainGenerator(this.seed);
     this.time = new TimeOfDay(options.startTime ?? 0.08);
+    this.weather = new Weather(this.seed);
 
     this.player = new Player(0.5, SEA_LEVEL + 8, 0.5);
     this.player.gameMode = parseGameMode(options.gameMode, GameMode.Survival);
+    if (this.player.gameMode === GameMode.Creative) {
+      this.player.inventory = Inventory.creativeLoadout();
+    }
 
     this.streamer = new ChunkStreamer({
       world: this.world,
@@ -202,7 +264,16 @@ export class Game {
     this.loop = new GameLoop(handlers, options.clock ?? browserClock);
 
     this.renderer.setRenderDistance(this.streamer.renderDistance);
-    this.renderer.setSky({ light: this.time.lightLevel, sunHeight: this.time.sunHeight });
+    this.renderer.setRainSurfaceSampler?.((x, z) => this.world.surfaceHeightAt(x, z));
+    this.applySky();
+
+    this.multiplayer?.onBlockEdit((edit) => {
+      const result = this.editor.applyBlockEdit(edit.x, edit.y, edit.z, edit.block);
+      if (!result.ok && result.reason === EditRejection.NotLoaded) {
+        this.pendingNetworkEdits.set(`${edit.x},${edit.y},${edit.z}`, edit);
+      }
+    });
+    this.multiplayer?.onStatus((message) => this.notify(message));
   }
 
   get isRunning(): boolean {
@@ -214,7 +285,12 @@ export class Game {
   }
 
   get selectedBlock(): BlockId {
-    return HOTBAR_BLOCKS[this.player.selectedSlot] ?? HOTBAR_BLOCKS[0];
+    const definition = this.selectedItem;
+    return definition?.block ?? HOTBAR_BLOCKS[0];
+  }
+
+  get selectedItem(): ItemDefinition | null {
+    return itemDefinition(this.player.inventory.hotbar[this.player.selectedSlot] ?? null);
   }
 
   get entityCount(): number {
@@ -243,6 +319,85 @@ export class Game {
     return () => this.noticeListeners.delete(listener);
   }
 
+  onInventoryChange(listener: () => void): () => void {
+    this.inventoryListeners.add(listener);
+    return () => this.inventoryListeners.delete(listener);
+  }
+
+  onInventoryToggle(listener: (open: boolean) => void): () => void {
+    this.inventoryToggleListeners.add(listener);
+    return () => this.inventoryToggleListeners.delete(listener);
+  }
+
+  onWorldStatusChange(listener: (status: WorldStatus) => void): () => void {
+    this.worldStatusListeners.add(listener);
+    return () => this.worldStatusListeners.delete(listener);
+  }
+
+  worldStatus(): WorldStatus {
+    return { time: this.time.clock, isNight: this.time.isNight, weather: this.weather.kind };
+  }
+
+  inventoryView(): InventoryView {
+    const creative = this.player.gameMode === GameMode.Creative;
+    const toView = (id: ItemId): ItemView | null => {
+      const definition = itemDefinition(id);
+      if (definition === null) return null;
+      return {
+        id,
+        name: definition.name,
+        kind: definition.kind,
+        count: creative ? Infinity : this.player.inventory.count(id),
+      };
+    };
+
+    return {
+      creative,
+      selectedSlot: this.player.selectedSlot,
+      hotbar: this.player.inventory.hotbar.map((item) => (item === null ? null : toView(item))),
+      items: this.player.inventory.entries().flatMap(({ item }) => {
+        const view = toView(item);
+        return view === null ? [] : [view];
+      }),
+      recipes: RECIPES.map((recipe) => ({
+        id: recipe.id,
+        name: recipe.name,
+        available: creative || canCraft(this.player.inventory, recipe),
+        detail: recipe.inputs
+          .map((input) => `${input.count} ${itemDefinition(input.item)?.name ?? input.item}`)
+          .join(' + '),
+      })),
+    };
+  }
+
+  assignHotbar(item: ItemId): boolean {
+    const definition = itemDefinition(item);
+    if (definition === null) return false;
+    if (
+      this.player.gameMode !== GameMode.Creative &&
+      !this.player.inventory.has(definition.id)
+    ) {
+      return false;
+    }
+    if (!this.player.inventory.assignHotbar(this.player.selectedSlot, definition.id)) return false;
+    this.emitInventory();
+    return true;
+  }
+
+  craftRecipe(recipeId: string): boolean {
+    const recipe = RECIPES.find((entry) => entry.id === recipeId);
+    if (recipe === undefined) return false;
+    const crafted =
+      this.player.gameMode === GameMode.Creative
+        ? this.assignHotbar(recipe.output.item)
+        : craft(this.player.inventory, recipe);
+    if (crafted) {
+      this.emitInventory();
+      this.notify(`Crafted ${recipe.name}`);
+    }
+    return crafted;
+  }
+
   /**
    * Restores saved state, guarantees the spawn area exists, then starts the
    * loop. Spawn chunks are loaded before the first frame so the player can
@@ -269,9 +424,12 @@ export class Game {
     }
 
     this.emitStatus();
+    this.emitInventory();
+    this.emitWorldStatus();
 
     // Prime streaming so the first rendered frame already has geometry queued.
     this.streamer.update(this.player.x, this.player.z);
+    this.multiplayer?.connect();
     this.loop.start();
   }
 
@@ -299,11 +457,15 @@ export class Game {
     this.slotListeners.clear();
     this.statusListeners.clear();
     this.noticeListeners.clear();
+    this.inventoryListeners.clear();
+    this.inventoryToggleListeners.clear();
+    this.worldStatusListeners.clear();
 
     this.input.dispose();
     this.mesher.dispose();
     this.renderer.dispose();
     this.repository.dispose();
+    this.multiplayer?.dispose();
   }
 
   /** Writes player state and every chunk holding unsaved edits. */
@@ -317,6 +479,7 @@ export class Game {
           version: SAVE_VERSION,
           updatedAt: Date.now(),
           timeOfDay: this.time.fraction,
+          weather: this.weather.snapshot(),
         }),
         this.repository.savePlayer(this.player.toSnapshot()),
         this.streamer.flush(),
@@ -352,6 +515,7 @@ export class Game {
     this.mining.reset();
     if (!this.player.rules.attractsHostiles) this.entities.removeAll();
     this.emitStatus();
+    this.emitInventory();
     this.notify(`${mode === GameMode.Creative ? 'Creative' : 'Survival'} mode`);
   }
 
@@ -433,9 +597,16 @@ export class Game {
     if (slot !== null && slot !== this.player.selectedSlot) {
       this.player.selectedSlot = slot;
       for (const listener of this.slotListeners) listener(slot);
+      this.emitInventory();
     }
 
     this.time.advance(step);
+    if (this.weather.advance(step)) {
+      this.emitWorldStatus();
+      this.notify(
+        this.weather.kind === 'clear' ? 'The weather cleared' : `Weather: ${this.weather.kind}`,
+      );
+    }
     this.player.tickTimers(step);
 
     if (this.player.isDead) {
@@ -488,7 +659,20 @@ export class Game {
     // A swing at a creature is not a mining action.
     const mineable = this.targetEntityName === null ? this.target : null;
 
-    if (this.mining.update(this.player, mineable, held, step)) {
+    const broken = this.mining.update(this.player, mineable, held, step);
+    if (broken !== null) {
+      if (this.player.gameMode === GameMode.Survival) {
+        this.player.inventory.add(blockItem(broken));
+        this.emitInventory();
+      }
+      if (mineable !== null) {
+        this.multiplayer?.publishBlockEdit({
+          x: mineable.x,
+          y: mineable.y,
+          z: mineable.z,
+          block: BlockId.Air,
+        });
+      }
       this.target = this.editor.findTarget(this.player);
     }
     this.renderer.setBreakProgress(this.mining.currentProgress);
@@ -515,12 +699,18 @@ export class Game {
         );
         break;
 
+      case InputAction.ToggleInventory:
+        this.inventoryOpen = !this.inventoryOpen;
+        this.input.reset();
+        for (const listener of this.inventoryToggleListeners) listener(this.inventoryOpen);
+        break;
+
       case InputAction.Attack:
         this.handleAttack();
         break;
 
       case InputAction.Use:
-        if (!this.player.isDead) this.editor.placeBlock(this.player, this.selectedBlock);
+        if (!this.player.isDead) this.useSelectedItem();
         break;
 
       case InputAction.Respawn:
@@ -545,8 +735,68 @@ export class Game {
     }
 
     if (this.player.rules.instantMining) {
-      this.editor.breakBlock(this.player);
+      const hit = this.editor.findTarget(this.player);
+      const result = this.editor.breakBlock(this.player);
+      if (result.ok && hit !== null && this.player.gameMode === GameMode.Survival) {
+        this.player.inventory.add(blockItem(hit.block as BlockId));
+        this.emitInventory();
+      }
+      if (result.ok) {
+        this.multiplayer?.publishBlockEdit({
+          x: result.x,
+          y: result.y,
+          z: result.z,
+          block: BlockId.Air,
+        });
+      }
       this.target = this.editor.findTarget(this.player);
+    }
+  }
+
+  private useSelectedItem(): void {
+    const item = this.selectedItem;
+    if (item === null) {
+      this.notify('Select an item from the inventory (E)');
+      return;
+    }
+
+    if (item.kind === 'block' && item.block !== undefined) {
+      if (
+        this.player.gameMode === GameMode.Survival &&
+        !this.player.inventory.has(item.id)
+      ) {
+        this.notify(`No ${item.name} left`);
+        return;
+      }
+      const result = this.editor.placeBlock(this.player, item.block);
+      if (result.ok && this.player.gameMode === GameMode.Survival) {
+        this.player.inventory.remove(item.id);
+        this.emitInventory();
+      }
+      if (result.ok) {
+        this.multiplayer?.publishBlockEdit({
+          x: result.x,
+          y: result.y,
+          z: result.z,
+          block: item.block,
+        });
+      }
+      return;
+    }
+
+    if (item.kind === 'spawnEgg' && item.entity !== undefined) {
+      if (this.player.gameMode !== GameMode.Creative) {
+        this.notify('Spawn eggs are creative only');
+        return;
+      }
+      const hit = this.editor.findTarget(this.player);
+      if (hit === null) return;
+      const x = hit.x + hit.normalX + 0.5;
+      const y = hit.y + hit.normalY;
+      const z = hit.z + hit.normalZ + 0.5;
+      const spawned = this.entities.spawn(item.entity, x, y, z, this.player.yaw + Math.PI);
+      if (spawned === null) this.notify('Mob limit reached');
+      else this.notify(`Spawned ${spawned.definition.name}`);
     }
   }
 
@@ -571,11 +821,36 @@ export class Game {
     // Streaming is presentation-rate work, not simulation: doing it here keeps
     // it to exactly one pass per frame under any tick backlog.
     this.streamer.update(x, z);
+    this.applyPendingNetworkEdits();
     this.applyAdaptiveQuality(frameTime);
 
     this.renderer.setBlockHighlight(this.target);
-    this.renderer.syncEntities(this.entities.snapshot(alpha));
-    this.renderer.setSky({ light: this.time.lightLevel, sunHeight: this.time.sunHeight });
+    const localEntities = this.entities.snapshot(alpha);
+    this.networkViews.length = 0;
+    this.networkViews.push(...localEntities);
+    for (const peer of this.multiplayer?.peers() ?? []) {
+      this.networkViews.push({
+        id: stablePeerId(peer.id),
+        type: EntityTypeId.RemotePlayer,
+        x: peer.x,
+        y: peer.y,
+        z: peer.z,
+        yaw: peer.yaw,
+        walkPhase: peer.moving ? performance.now() * 0.008 : 0,
+        hurt: false,
+      });
+    }
+    this.renderer.syncEntities(this.networkViews);
+    this.multiplayer?.publishPresence({
+      name: 'Player',
+      x,
+      y,
+      z,
+      yaw: this.player.yaw,
+      moving:
+        Math.abs(this.player.velocityX) > 0.05 || Math.abs(this.player.velocityZ) > 0.05,
+    });
+    this.applySky();
 
     const eyeY = y + PLAYER_EYE_HEIGHT;
     this.renderer.setSubmerged(
@@ -587,6 +862,27 @@ export class Game {
       yaw: this.player.yaw,
       pitch: this.player.pitch,
     });
+  }
+
+  private applySky(): void {
+    this.renderer.setSky({
+      light: this.time.lightLevel,
+      sunHeight: this.time.sunHeight,
+      weatherDarkening: this.weather.skyDarkening,
+      fogMultiplier: this.weather.fogMultiplier,
+      precipitation:
+        this.weather.kind === 'storm' ? 1 : this.weather.kind === 'rain' ? 0.62 : 0,
+    });
+  }
+
+  private applyPendingNetworkEdits(): void {
+    let budget = 24;
+    for (const [key, edit] of this.pendingNetworkEdits) {
+      if (budget-- <= 0) break;
+      if (!this.world.isLoadedAt(edit.x, edit.z)) continue;
+      this.editor.applyBlockEdit(edit.x, edit.y, edit.z, edit.block);
+      this.pendingNetworkEdits.delete(key);
+    }
   }
 
   private applyAdaptiveQuality(frameTime: number): void {
@@ -623,6 +919,15 @@ export class Game {
     for (const listener of this.statusListeners) listener(status);
   }
 
+  private emitInventory(): void {
+    for (const listener of this.inventoryListeners) listener();
+  }
+
+  private emitWorldStatus(): void {
+    const status = this.worldStatus();
+    for (const listener of this.worldStatusListeners) listener(status);
+  }
+
   private notify(message: string): void {
     for (const listener of this.noticeListeners) listener(message);
   }
@@ -639,6 +944,7 @@ export class Game {
       if (metadata !== null && Number.isFinite(metadata.timeOfDay)) {
         this.time.fraction = metadata.timeOfDay as number;
       }
+      if (metadata?.weather !== undefined) this.weather.restore(metadata.weather);
 
       if (snapshot === null) return null;
       // Reject anything that would put the player somewhere unrecoverable.
@@ -664,10 +970,11 @@ export class Game {
     this.player.gameMode = restored.gameMode;
     this.player.health = restored.health;
     this.player.setSpawnPoint(restored.spawnX, restored.spawnY, restored.spawnZ);
+    this.player.inventory = restored.inventory;
     this.player.selectedSlot =
       Number.isInteger(restored.selectedSlot) &&
       restored.selectedSlot >= 0 &&
-      restored.selectedSlot < HOTBAR_BLOCKS.length
+      restored.selectedSlot < restored.inventory.hotbar.length
         ? restored.selectedSlot
         : 0;
 

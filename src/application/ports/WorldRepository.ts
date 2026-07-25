@@ -1,6 +1,7 @@
 import type { ChunkEdits } from '@domain/world/Chunk';
 import type { ChunkCoord } from '@domain/world/ChunkCoord';
 import type { PlayerSnapshot } from '@domain/player/Player';
+import type { WeatherSnapshot } from '@domain/world/Weather';
 
 export interface WorldMetadata {
   readonly seed: number;
@@ -9,6 +10,8 @@ export interface WorldMetadata {
   readonly updatedAt: number;
   /** Point in the day/night cycle, in [0, 1). Absent in version 1 saves. */
   readonly timeOfDay?: number;
+  /** Absent in saves written before weather was introduced. */
+  readonly weather?: WeatherSnapshot;
 }
 
 /**

@@ -5,6 +5,7 @@ export const InputAction = {
   ToggleFlight: 'toggleFlight',
   ToggleDebug: 'toggleDebug',
   ToggleGameMode: 'toggleGameMode',
+  ToggleInventory: 'toggleInventory',
   /** Left click: attacks a creature if one is targeted, else starts mining. */
   Attack: 'attack',
   /** Right click: places the selected block. */

@@ -244,6 +244,10 @@ export class BrowserInput implements InputSource {
       case 'KeyG':
         if (this.captured) this.actions.push(InputAction.ToggleGameMode);
         break;
+      case 'KeyE':
+        event.preventDefault();
+        this.actions.push(InputAction.ToggleInventory);
+        break;
       case 'KeyR':
       case 'Enter':
         this.actions.push(InputAction.Respawn);
