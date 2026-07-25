@@ -1,8 +1,10 @@
 import './presentation/styles.css';
 
 import { Game } from '@application/Game';
-import type { WorldRepository } from '@application/ports/WorldRepository';
+import type { WorldMetadata, WorldRepository } from '@application/ports/WorldRepository';
+import { settingsForWorld } from '@application/services/WorldCreationService';
 import { GameMode, parseGameMode } from '@domain/player/GameMode';
+import type { PlayerSnapshot } from '@domain/player/Player';
 import { seedFromString } from '@domain/generation/Noise';
 import { BrowserInput } from '@infrastructure/input/BrowserInput';
 import { WorkerChunkMesher } from '@infrastructure/meshing/WorkerChunkMesher';
@@ -26,6 +28,8 @@ const DEFAULT_RENDER_DISTANCE = 8;
 interface Persistence {
   readonly repository: WorldRepository;
   readonly durable: boolean;
+  readonly metadata: WorldMetadata | null;
+  readonly player: PlayerSnapshot | null;
 }
 
 /**
@@ -37,11 +41,19 @@ async function createPersistence(seed: number): Promise<Persistence> {
     const repository = new IndexedDbWorldRepository(String(seed));
     // Force a real connection now so a failure surfaces here rather than
     // silently losing the first save twenty seconds into play.
-    await repository.loadMetadata();
-    return { repository, durable: true };
+    const [metadata, player] = await Promise.all([
+      repository.loadMetadata(),
+      repository.loadPlayer(),
+    ]);
+    return { repository, durable: true, metadata, player };
   } catch (error) {
     console.warn('[craftjs] persistent storage unavailable; progress will not be saved', error);
-    return { repository: new InMemoryWorldRepository(), durable: false };
+    return {
+      repository: new InMemoryWorldRepository(),
+      durable: false,
+      metadata: null,
+      player: null,
+    };
   }
 }
 
@@ -95,7 +107,7 @@ function renderDistanceFromQuery(): number {
   return Math.max(2, Math.min(16, value));
 }
 
-/** `?mode=creative` overrides the saved mode for this session. */
+/** `?mode=creative` preselects the mode for a newly created world. */
 function gameModeFromQuery(): GameMode | undefined {
   const raw = new URLSearchParams(globalThis.location?.search ?? '').get('mode');
   if (raw === null) return undefined;
@@ -129,8 +141,12 @@ async function bootstrap(): Promise<void> {
     seed: resolveSeed(),
     gameMode: gameModeFromQuery() ?? GameMode.Survival,
   });
-  const seed = launch.seed;
-  const { repository, durable } = await createPersistence(seed);
+  const requestedSettings = launch.creationSettings;
+  const { repository, durable, metadata, player } = await createPersistence(
+    requestedSettings.seed,
+  );
+  const worldCreation = settingsForWorld(metadata, requestedSettings, player?.gameMode);
+  const seed = worldCreation.seed;
   if (durable) writeSetting(LAST_SEED_KEY, String(seed));
   const renderDistance = renderDistanceFromQuery();
 
@@ -164,14 +180,21 @@ async function bootstrap(): Promise<void> {
     mesher,
     repository,
     durablePersistence: durable,
-    seed,
-    gameMode: launch.gameMode,
+    worldCreation,
     multiplayer,
     streaming: { renderDistance },
   });
 
   const hud = new Hud(hudRoot, game);
   hud.setPaused(true);
+
+  let exiting = false;
+  game.onExitRequest(() => {
+    if (exiting) return;
+    exiting = true;
+    hud.dispose();
+    void game.dispose().finally(() => globalThis.location.reload());
+  });
 
   // Pointer lock is the single source of truth for "is the player playing".
   input.onCaptureChange((captured) => {

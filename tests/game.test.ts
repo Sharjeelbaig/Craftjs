@@ -14,6 +14,14 @@ import { NO_INTENT } from '@domain/player/PlayerIntent';
 import { MovementMode, PLAYER_EYE_HEIGHT } from '@domain/player/Player';
 import { GameMode } from '@domain/player/GameMode';
 import { BlockId, HOTBAR_BLOCKS } from '@domain/world/BlockType';
+import { FlatTerrainGenerator } from '@domain/generation/FlatTerrainGenerator';
+import { starterChestPosition } from '@domain/world/StarterChest';
+import { blockItem } from '@domain/inventory/Item';
+import {
+  GeneratorPreset,
+  createWorldCreationSettings,
+  type WorldCreationSettings,
+} from '@domain/world/WorldCreationSettings';
 import { buildChunkMesh } from '@infrastructure/meshing/ChunkMeshBuilder';
 import { InMemoryWorldRepository } from '@infrastructure/persistence/InMemoryWorldRepository';
 
@@ -118,6 +126,12 @@ class StubRenderer implements GameRenderer {
   }
 }
 
+class FailingDeleteRepository extends InMemoryWorldRepository {
+  override clear(): Promise<void> {
+    return Promise.reject(new Error('storage locked'));
+  }
+}
+
 const immediateMesher: ChunkMesher = {
   capacity: 4,
   submit: (request: MeshRequest): Promise<MeshResponse> =>
@@ -141,6 +155,8 @@ function build(
   seed = 777,
   repository = new InMemoryWorldRepository(),
   gameMode: GameMode = GameMode.Creative,
+  worldCreation?: WorldCreationSettings,
+  onError?: (error: unknown, context: string) => void,
 ): Built {
   const clock = new ManualClock();
   const input = new StubInput();
@@ -154,6 +170,8 @@ function build(
     durablePersistence: true,
     seed,
     gameMode,
+    worldCreation,
+    onError,
     clock,
     // Creature spawning is exercised in its own suite; leaving it on here
     // would make unrelated assertions depend on random population.
@@ -377,6 +395,144 @@ describe('Game', () => {
     expect(metadata?.seed).toBe(4321);
     expect(metadata?.version).toBeGreaterThan(0);
 
+    await built.game.dispose();
+  });
+
+  it('persists the complete immutable world creation settings', async () => {
+    const repository = new InMemoryWorldRepository();
+    const result = createWorldCreationSettings({
+      name: 'Saved configuration',
+      seed: 2468,
+      gameMode: GameMode.Hardcore,
+      generatorPreset: GeneratorPreset.Flat,
+      structures: false,
+      bonusChest: true,
+    });
+    if (!result.ok) throw new Error(result.error);
+    const built = build(2468, repository, GameMode.Hardcore, result.value);
+    await built.game.start();
+    await built.game.save();
+
+    expect((await repository.loadMetadata())?.creation).toEqual(result.value);
+    await built.game.dispose();
+  });
+
+  it('collects deterministic starter loot once and persists the claimed state', async () => {
+    const repository = new InMemoryWorldRepository();
+    const result = createWorldCreationSettings({
+      name: 'Starter supplies',
+      seed: 9753,
+      gameMode: GameMode.Survival,
+      generatorPreset: GeneratorPreset.Flat,
+      structures: false,
+      bonusChest: true,
+    });
+    if (!result.ok) throw new Error(result.error);
+    const built = build(9753, repository, GameMode.Survival, result.value);
+    await built.game.start();
+
+    const chest = starterChestPosition(new FlatTerrainGenerator(9753), 9753);
+    built.game.player.moveTo(chest.x + 0.5, chest.y, chest.z + 2.5);
+    built.game.player.yaw = 0;
+    built.game.player.pitch = -0.5;
+    built.input.actions.push(InputAction.Use);
+    await frames(built, 1);
+
+    expect(built.game.player.bonusChestClaimed).toBe(true);
+    expect(built.game.world.getBlock(chest.x, chest.y, chest.z)).toBe(BlockId.Air);
+    const logs = built.game.player.inventory.count(blockItem(BlockId.Log));
+    expect(logs).toBeGreaterThan(0);
+
+    built.game.player.selectedSlot = 8;
+    built.input.actions.push(InputAction.Use);
+    await frames(built, 1);
+    expect(built.game.player.inventory.count(blockItem(BlockId.Log))).toBe(logs);
+    await built.game.save();
+    await built.game.dispose();
+
+    const reopened = build(9753, repository, GameMode.Survival, result.value);
+    await reopened.game.start();
+    expect(reopened.game.player.bonusChestClaimed).toBe(true);
+    expect(reopened.game.world.getBlock(chest.x, chest.y, chest.z)).toBe(BlockId.Air);
+    await reopened.game.dispose();
+  });
+
+  it('keeps Hardcore death across reload and never performs a normal respawn', async () => {
+    const repository = new InMemoryWorldRepository();
+    const result = createWorldCreationSettings({
+      name: 'One life',
+      seed: 1357,
+      gameMode: GameMode.Hardcore,
+      generatorPreset: GeneratorPreset.Flat,
+      structures: false,
+      bonusChest: false,
+    });
+    if (!result.ok) throw new Error(result.error);
+
+    const first = build(1357, repository, GameMode.Hardcore, result.value);
+    await first.game.start();
+    first.game.player.health = 0;
+    await first.game.save();
+    await first.game.dispose();
+
+    const reopened = build(1357, repository, GameMode.Survival, result.value);
+    await reopened.game.start();
+    expect(reopened.game.player.gameMode).toBe(GameMode.Hardcore);
+    expect(reopened.game.player.isDead).toBe(true);
+    reopened.game.respawn();
+    expect(reopened.game.player.health).toBe(0);
+
+    let exited = false;
+    reopened.game.onExitRequest(() => {
+      exited = true;
+    });
+    await expect(reopened.game.exitHardcoreWorld(false)).resolves.toBe(true);
+    expect(exited).toBe(true);
+    expect(await repository.loadMetadata()).not.toBeNull();
+    await reopened.game.dispose();
+  });
+
+  it('deletes a dead Hardcore world only after the explicit delete action', async () => {
+    const repository = new InMemoryWorldRepository();
+    const result = createWorldCreationSettings({
+      name: 'Delete deliberately',
+      seed: 8642,
+      gameMode: GameMode.Hardcore,
+      generatorPreset: GeneratorPreset.Flat,
+      structures: false,
+      bonusChest: false,
+    });
+    if (!result.ok) throw new Error(result.error);
+    const built = build(8642, repository, GameMode.Hardcore, result.value);
+    await built.game.start();
+    built.game.player.health = 0;
+    await built.game.save();
+
+    await expect(built.game.exitHardcoreWorld(true)).resolves.toBe(true);
+    expect(await repository.loadMetadata()).toBeNull();
+    expect(await repository.loadPlayer()).toBeNull();
+    await built.game.dispose();
+    expect(await repository.loadMetadata()).toBeNull();
+  });
+
+  it('keeps a Hardcore save when explicit deletion fails', async () => {
+    const repository = new FailingDeleteRepository();
+    const result = createWorldCreationSettings({
+      name: 'Deletion failure',
+      seed: 1112,
+      gameMode: GameMode.Hardcore,
+      generatorPreset: GeneratorPreset.Flat,
+      structures: false,
+      bonusChest: false,
+    });
+    if (!result.ok) throw new Error(result.error);
+    const built = build(1112, repository, GameMode.Hardcore, result.value, () => {});
+    await built.game.start();
+    built.game.player.health = 0;
+    await built.game.save();
+
+    await expect(built.game.exitHardcoreWorld(true)).resolves.toBe(false);
+    expect(await repository.loadMetadata()).not.toBeNull();
     await built.game.dispose();
   });
 

@@ -1,4 +1,4 @@
-import type { TerrainGenerator } from '@domain/generation/TerrainGenerator';
+import type { ChunkGenerator } from '@domain/generation/ChunkGenerator';
 import type { Chunk, ChunkEdits } from '@domain/world/Chunk';
 import { ChunkCoord, type ChunkKey } from '@domain/world/ChunkCoord';
 import type { World } from '@domain/world/World';
@@ -49,7 +49,7 @@ export interface StreamingStats {
 
 interface Dependencies {
   readonly world: World;
-  readonly generator: TerrainGenerator;
+  readonly generator: ChunkGenerator;
   readonly mesher: ChunkMesher;
   readonly renderer: GameRenderer;
   readonly repository: WorldRepository;
@@ -67,7 +67,7 @@ interface Dependencies {
  */
 export class ChunkStreamer {
   private readonly world: World;
-  private readonly generator: TerrainGenerator;
+  private readonly generator: ChunkGenerator;
   private readonly mesher: ChunkMesher;
   private readonly renderer: GameRenderer;
   private readonly repository: WorldRepository;
@@ -202,10 +202,10 @@ export class ChunkStreamer {
     await Promise.allSettled(writes);
   }
 
-  async dispose(): Promise<void> {
+  async dispose(flush = true): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
-    await this.flush();
+    if (flush) await this.flush();
     this.generationQueue.length = 0;
     this.readyMeshes.length = 0;
     this.fetching.clear();

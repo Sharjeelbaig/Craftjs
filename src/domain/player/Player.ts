@@ -51,6 +51,8 @@ export interface PlayerSnapshot {
   readonly spawnZ?: number;
   /** Optional so worlds saved before inventories were introduced still load. */
   readonly inventory?: InventorySnapshot;
+  /** Single-use starter chest state. Absent in saves written before bonus chests. */
+  readonly bonusChestClaimed?: boolean;
 }
 
 /**
@@ -82,6 +84,7 @@ export class Player {
   mode: MovementMode = MovementMode.Walking;
   selectedSlot = 0;
   inventory = new Inventory();
+  bonusChestClaimed = false;
 
   gameMode: GameMode = GameMode.Survival;
   health = PLAYER_MAX_HEALTH;
@@ -128,13 +131,16 @@ export class Player {
         ? Inventory.creativeLoadout()
         : Inventory.fromSnapshot(snapshot.inventory);
 
-    // Health may be absent (older save) or nonsense (hand-edited); clamp into
-    // a playable range rather than starting the session already dead.
+    // Hardcore is the one mode where zero health is meaningful across reloads.
+    // Other old or malformed saves still recover to a playable state.
     const health = Number(snapshot.health);
     player.health =
-      Number.isFinite(health) && health > 0
-        ? Math.min(health, PLAYER_MAX_HEALTH)
-        : PLAYER_MAX_HEALTH;
+      player.gameMode === GameMode.Hardcore && Number.isFinite(health) && health <= 0
+        ? 0
+        : Number.isFinite(health) && health > 0
+          ? Math.min(health, PLAYER_MAX_HEALTH)
+          : PLAYER_MAX_HEALTH;
+    player.bonusChestClaimed = snapshot.bonusChestClaimed === true;
 
     if (
       Number.isFinite(snapshot.spawnX) &&
@@ -167,6 +173,7 @@ export class Player {
       spawnY: this.spawnY,
       spawnZ: this.spawnZ,
       inventory: this.inventory.toSnapshot(),
+      bonusChestClaimed: this.bonusChestClaimed,
     };
   }
 
@@ -179,8 +186,9 @@ export class Player {
   }
 
   /** Switches mode, enforcing the rules that differ between them. */
-  setGameMode(mode: GameMode): void {
-    if (mode === this.gameMode) return;
+  setGameMode(mode: GameMode): boolean {
+    if (mode === this.gameMode) return true;
+    if (!this.rules.canChangeMode || mode === GameMode.Hardcore) return false;
     this.gameMode = mode;
     if (!this.rules.canFly) this.mode = MovementMode.Walking;
     if (!this.rules.takesDamage) {
@@ -196,16 +204,19 @@ export class Player {
       }
     }
     this.fallDistance = 0;
+    return true;
   }
 
   /** Restores the player at their spawn point with full health. */
-  respawn(): void {
+  respawn(): boolean {
+    if (!this.rules.canRespawn) return false;
     this.health = this.maxHealth;
     this.hurtTimer = 0;
     this.attackCooldown = 0;
     this.fallDistance = 0;
     this.mode = MovementMode.Walking;
     this.moveTo(this.spawnX, this.spawnY, this.spawnZ);
+    return true;
   }
 
   setSpawnPoint(x: number, y: number, z: number): void {
