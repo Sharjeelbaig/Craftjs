@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": ["vite/client", "node"],
+
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+    "forceConsistentCasingInFileNames": true,
+
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "useDefineForClassFields": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@domain/*": ["src/domain/*"],
+      "@application/*": ["src/application/*"],
+      "@infrastructure/*": ["src/infrastructure/*"],
+      "@presentation/*": ["src/presentation/*"]
+    }
+  },
+  "include": ["src", "tests", "vite.config.ts"]
+}

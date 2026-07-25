@@ -1,0 +1,352 @@
+:root {
+  --hud-bg: rgba(12, 14, 18, 0.72);
+  --hud-border: rgba(255, 255, 255, 0.14);
+  --hud-text: #eef2f6;
+  --hud-muted: #a9b4c0;
+  --accent: #7fc8ff;
+  --font-ui: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0e13;
+  color: var(--hud-text);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+#viewport {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Voxel art is nearest-filtered; let the browser upscale the same way. */
+  image-rendering: pixelated;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+#hud {
+  position: absolute;
+  inset: 0;
+  /* The HUD is decoration — clicks must reach the canvas beneath it. */
+  pointer-events: none;
+  user-select: none;
+}
+
+.is-hidden {
+  display: none !important;
+}
+
+/* ------------------------------------------------------------- crosshair */
+
+.crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  opacity: 0.85;
+}
+
+.crosshair::before,
+.crosshair::after {
+  content: '';
+  position: absolute;
+  background: #fff;
+  /* Difference blending keeps the crosshair legible against any terrain. */
+  mix-blend-mode: difference;
+}
+
+.crosshair::before {
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.crosshair::after {
+  left: 50%;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  transform: translateX(-50%);
+}
+
+/* ---------------------------------------------------------------- hotbar */
+
+.hotbar {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+
+.hotbar__slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 76px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.hotbar__slot.is-selected {
+  background: rgba(127, 200, 255, 0.16);
+  border-color: var(--accent);
+}
+
+.hotbar__key {
+  font-size: 10px;
+  color: var(--hud-muted);
+}
+
+.hotbar__label {
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- health */
+
+.health {
+  position: absolute;
+  bottom: 78px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 3px;
+  padding: 6px 10px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 999px;
+}
+
+.heart {
+  width: 14px;
+  height: 13px;
+  /* Two overlapping circles and a square: a heart without an image asset. */
+  background:
+    radial-gradient(circle at 30% 32%, currentColor 52%, transparent 53%),
+    radial-gradient(circle at 70% 32%, currentColor 52%, transparent 53%),
+    linear-gradient(currentColor, currentColor) 50% 62% / 74% 46% no-repeat;
+  clip-path: polygon(50% 100%, 0 45%, 0 20%, 25% 0, 50% 18%, 75% 0, 100% 20%, 100% 45%);
+  color: #e2455a;
+  transition: color 140ms ease, opacity 140ms ease;
+}
+
+.heart[data-state='empty'] {
+  color: #3a3f4a;
+}
+
+.heart[data-state='half'] {
+  /* Left half red, right half drained. */
+  background-image:
+    linear-gradient(90deg, #e2455a 50%, #3a3f4a 50%);
+  clip-path: polygon(50% 100%, 0 45%, 0 20%, 25% 0, 50% 18%, 75% 0, 100% 20%, 100% 45%);
+  color: transparent;
+}
+
+/* ----------------------------------------------------------- mode badge */
+
+.mode-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 5px 12px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ffb4a2;
+}
+
+.mode-badge.is-creative {
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------- damage flash */
+
+.damage-flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(160, 12, 24, 0) 35%,
+    rgba(170, 14, 26, 0.55) 100%
+  );
+  transition: opacity 200ms ease;
+}
+
+.damage-flash.is-active {
+  opacity: 1;
+  transition: opacity 60ms ease;
+}
+
+/* ----------------------------------------------------------------- debug */
+
+.debug {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 10px 14px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  backdrop-filter: blur(6px);
+}
+
+/* --------------------------------------------------------------- overlay */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 11, 16, 0.66);
+  backdrop-filter: blur(3px);
+}
+
+.overlay__panel {
+  padding: 32px 40px;
+  text-align: center;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.overlay__title {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.overlay__title span {
+  color: var(--accent);
+}
+
+.overlay--death {
+  background: rgba(46, 6, 10, 0.72);
+}
+
+.overlay__title--death {
+  color: #ff8f7a;
+  font-size: 34px;
+}
+
+.muted {
+  color: var(--hud-muted);
+}
+
+.overlay__hint {
+  margin: 6px 0 22px;
+  color: var(--hud-muted);
+  font-size: 13px;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px 24px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.controls > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.controls dt {
+  color: var(--hud-muted);
+}
+
+.controls dd {
+  margin: 0;
+}
+
+/* ----------------------------------------------------------------- toast */
+
+.toast {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------ fatal error */
+
+.fatal {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #0b0e13;
+  text-align: center;
+}
+
+.fatal h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.fatal p {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--hud-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .hotbar__slot {
+    min-width: 44px;
+    padding: 6px;
+  }
+
+  .hotbar__label {
+    display: none;
+  }
+}
