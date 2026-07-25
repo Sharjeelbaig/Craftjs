@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512" role="img" aria-labelledby="title desc">
+  <title id="title">Craftjs</title>
+  <desc id="desc">An open blue voxel C with one gold block.</desc>
+  <rect width="64" height="64" rx="12" fill="#101820"/>
+  <g transform="translate(7 8) scale(.4)">
+    <defs>
+      <g id="voxel">
+        <path d="M14 0 28 7 14 14 0 7Z" fill="#8fdfff"/>
+        <path d="M0 7 14 14v16L0 23Z" fill="#53b7e8"/>
+        <path d="m14 14 14-7v16l-14 7Z" fill="#277c99"/>
+      </g>
+    </defs>
+    <use href="#voxel" x="15" y="10"/>
+    <use href="#voxel" x="44" y="10"/>
+    <use href="#voxel" x="73" y="10"/>
+    <use href="#voxel" x="15" y="39"/>
+    <use href="#voxel" x="15" y="68"/>
+    <use href="#voxel" x="44" y="68"/>
+    <use href="#voxel" x="73" y="68"/>
+    <g transform="translate(101 43)">
+      <path d="M10 0 20 5 10 10 0 5Z" fill="#ffe59a"/>
+      <path d="m0 5 10 5v12L0 17Z" fill="#f6c85f"/>
+      <path d="m10 10 10-5v12l-10 5Z" fill="#d89d28"/>
+    </g>
+  </g>
+</svg>

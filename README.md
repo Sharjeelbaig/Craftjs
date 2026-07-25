@@ -1,9 +1,31 @@
-# Craftjs
+<p align="center">
+  <img src="assets/brand/scene.svg" alt="The Craftjs open-chunk mark floating over a voxel grid" width="210">
+</p>
 
-A minimal, production-ready voxel sandbox engine for the browser. Built around
-stability and correctness rather than feature count: an effectively unbounded
-world, streamed and meshed off the main thread, with a fixed-timestep
-simulation that behaves identically on any hardware.
+<p align="center">
+  <img src="assets/brand/wordmark.svg" alt="Craftjs" width="430">
+</p>
+
+<p align="center"><strong>Stable worlds. One block at a time.</strong></p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#gameplay-baseline">Gameplay</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#testing">Testing</a> ·
+  <a href="#brand">Brand</a>
+</p>
+
+<p align="center">
+  <img src="assets/banner.svg" alt="Craftjs — a deterministic voxel sandbox for the browser" width="100%">
+</p>
+
+Craftjs is a minimal, deterministic voxel sandbox engine for the browser. It is
+built around stability and correctness rather than feature count: an
+effectively unbounded world, streamed and meshed off the main thread, with a
+fixed-timestep simulation that behaves identically on any hardware.
+
+## Quick start
 
 ```bash
 npm install
@@ -191,6 +213,13 @@ costs a single multiply and is independent of how many chunks are on screen.
 ```bash
 npm test
 ```
+
+## Brand
+
+The Craftjs identity is **the open chunk**: seven blue voxel cubes form an open
+`C`, with one gold cube representing the player's next intentional change. The
+production logo system, color tokens, voice, accessibility rules and export
+guidance live in the [brand guidelines](assets/brand/BRAND.md).
 
 ## Extending
 

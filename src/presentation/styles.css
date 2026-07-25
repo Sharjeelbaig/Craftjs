@@ -1,9 +1,16 @@
 :root {
+  --brand-night: #101820;
+  --brand-cloud: #f4f7f2;
+  --brand-sky: #53b7e8;
+  --brand-sky-bright: #8fdfff;
+  --brand-water: #1d5f78;
+  --brand-grass: #a7d948;
+  --brand-sun: #f6c85f;
   --hud-bg: rgba(12, 14, 18, 0.72);
   --hud-border: rgba(255, 255, 255, 0.14);
   --hud-text: #eef2f6;
   --hud-muted: #a9b4c0;
-  --accent: #7fc8ff;
+  --accent: var(--brand-sky);
   --font-ui: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
 }
 
@@ -247,38 +254,31 @@ body {
 
 .start-menu__brand {
   position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
   justify-self: center;
+  width: min(560px, 88vw);
   text-align: center;
 }
 
-.start-menu__brand h1 {
-  margin: 0;
-  color: #f2f2f2;
-  font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
-  font-size: clamp(64px, 11vw, 118px);
-  letter-spacing: 0.01em;
-  line-height: 0.85;
-  -webkit-text-stroke: 2px #161616;
-  text-shadow:
-    0 5px 0 #555,
-    0 8px 0 #161616,
-    5px 10px 12px rgba(0, 0, 0, 0.55);
-}
-
-.start-menu__brand h1 span {
-  color: #8bc7ee;
+.start-menu__brand-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.48));
 }
 
 .start-menu__brand p {
-  position: absolute;
-  right: -5%;
-  bottom: -24px;
   margin: 0;
-  color: #fff763;
-  font-size: clamp(12px, 2vw, 18px);
+  padding: 6px 12px;
+  border: 1px solid rgba(244, 247, 242, 0.3);
+  background: rgba(16, 24, 32, 0.7);
+  color: var(--brand-sun);
+  font-size: clamp(11px, 1.8vw, 15px);
   font-weight: 700;
-  transform: rotate(-8deg);
-  text-shadow: 2px 2px 0 #3a3100;
+  letter-spacing: 0.04em;
+  text-shadow: 1px 1px 0 rgba(16, 24, 32, 0.9);
 }
 
 .start-menu__main-actions,
