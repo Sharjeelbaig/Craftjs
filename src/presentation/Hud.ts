@@ -141,10 +141,11 @@ export class Hud {
 
   /** Mirrors health, game mode and death state. */
   setStatus(status: PlayerStatus): void {
-    const survival = status.gameMode === GameMode.Survival;
+    const survival = status.gameMode !== GameMode.Creative;
+    const hardcore = status.gameMode === GameMode.Hardcore;
 
     this.healthBar.classList.toggle('is-hidden', !survival);
-    this.modeBadge.textContent = survival ? 'Survival' : 'Creative';
+    this.modeBadge.textContent = hardcore ? 'Hardcore' : survival ? 'Survival' : 'Creative';
     this.modeBadge.classList.toggle('is-creative', !survival);
 
     if (survival) this.renderHearts(status.health, status.maxHealth);
@@ -156,7 +157,18 @@ export class Hud {
     this.lastHealth = survival ? status.health : Number.NaN;
 
     this.deathOverlay.classList.toggle('is-hidden', !status.dead);
-    if (status.dead) this.overlay.classList.add('is-hidden');
+    const hint = this.deathOverlay.querySelector<HTMLElement>('.overlay__hint');
+    const actions = this.deathOverlay.querySelector<HTMLElement>('.overlay__actions');
+    if (hint !== null) {
+      hint.textContent = hardcore
+        ? 'This Hardcore world cannot respawn. Your save is preserved.'
+        : 'Press R to respawn';
+    }
+    actions?.classList.toggle('is-hidden', !hardcore);
+    if (status.dead) {
+      this.overlay.classList.add('is-hidden');
+      if (document.pointerLockElement !== null) void document.exitPointerLock();
+    }
   }
 
   /** Transient status message, e.g. a storage warning. */
@@ -405,12 +417,38 @@ export class Hud {
   private createDeathOverlay(): HTMLElement {
     const overlay = document.createElement('div');
     overlay.className = 'overlay overlay--death is-hidden';
-    overlay.innerHTML = `
-      <div class="overlay__panel">
-        <h1 class="overlay__title overlay__title--death">You died</h1>
-        <p class="overlay__hint">Press R to respawn</p>
-      </div>
-    `;
+    const panel = document.createElement('div');
+    panel.className = 'overlay__panel';
+    const title = document.createElement('h1');
+    title.className = 'overlay__title overlay__title--death';
+    title.textContent = 'You died';
+    const hint = document.createElement('p');
+    hint.className = 'overlay__hint';
+    hint.textContent = 'Press R to respawn';
+    const actions = document.createElement('div');
+    actions.className = 'overlay__actions is-hidden';
+
+    const returnButton = document.createElement('button');
+    returnButton.type = 'button';
+    returnButton.textContent = 'Return to title';
+    returnButton.addEventListener('click', () => {
+      void this.game.exitHardcoreWorld(false);
+    });
+
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'danger';
+    deleteButton.textContent = 'Delete world';
+    deleteButton.addEventListener('click', () => {
+      const confirmed = globalThis.confirm(
+        `Delete “${this.game.creationSettings.name}”? This permanently removes this world's saved data.`,
+      );
+      if (confirmed) void this.game.exitHardcoreWorld(true);
+    });
+
+    actions.append(returnButton, deleteButton);
+    panel.append(title, hint, actions);
+    overlay.append(panel);
     return overlay;
   }
 

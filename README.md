@@ -10,7 +10,8 @@ npm install
 npm run dev
 ```
 
-Open the printed URL, choose a seed and mode in the start menu, then click to play.
+Open the printed URL, name the world, choose its seed, mode and generator
+options, then click Play.
 
 | Script | Purpose |
 | --- | --- |
@@ -52,6 +53,10 @@ both intact. With no `?seed`, the last world played is reopened.
   four small recipes cover planks, cobblestone, bricks and glass.
 - Creative inventory: every buildable block and six mob spawn eggs are
   available from `E`; click an item to equip the selected hotbar slot.
+- World creation supports Survival, Creative and permanent-death Hardcore,
+  Default or Flat terrain, and independent Structures and Bonus Chest options.
+  Those choices are immutable metadata: reopening a seed uses its saved
+  configuration rather than current menu defaults.
 - The day/night cycle, weather and inventory are saved with the world.
 - Rain is one depth-tested world-space line field, not a screen overlay. It has
   perspective and parallax while staying bounded to one draw call.
@@ -95,6 +100,15 @@ Every boundary the application crosses is an interface in
 `WorldRepository`. The integration tests drive the real `ChunkStreamer` and
 `WorldEditor` against in-memory doubles for all four, with no browser present.
 
+### World generation presets
+
+`ChunkStreamer` depends on the domain `ChunkGenerator` strategy, not on menu
+state. Default terrain uses the existing deterministic heightfield generator.
+Flat terrain has a fixed layer stack: bedrock at y=0, stone at y=1–43, dirt at
+y=44–46, grass at y=47, and air above. Optional generation decorators add one
+seeded safe ruin and one seeded starter chest; disabling either decorator
+produces none.
+
 ## Design decisions
 
 **Fixed-timestep simulation, interpolated rendering.** Physics always advances
@@ -123,11 +137,12 @@ seams that are never cleaned up, so the load radius extends one chunk beyond
 the render radius.
 
 **Only edits are persisted.** Terrain is a pure function of `(coordinate,
-seed)`, so a save stores the seed, the player, and the delta between generated
-terrain and what the player built. A world stays a few kilobytes no matter how
-far the player travels. Records are namespaced by seed: without that, opening a
-different seed would restore the previous world's player position and replay
-its edits onto unrelated terrain, corrupting both saves.
+seed, creation settings)`, so a save stores immutable creation metadata, the
+player, and the delta between generated terrain and what the player built. A
+world stays a few kilobytes no matter how far the player travels. Records are
+namespaced by seed: without that, opening a different seed would restore the
+previous world's player position and replay its edits onto unrelated terrain,
+corrupting both saves.
 
 **Unloaded space is solid.** `World.isSolidAt` reports missing chunks as solid,
 so a player can never fall through terrain that has not streamed in yet.
@@ -150,15 +165,16 @@ costs a single multiply and is independent of how many chunks are on screen.
 
 ## Testing
 
-154 tests covering the parts where correctness is not obvious by inspection:
+170 tests covering the parts where correctness is not obvious by inspection:
 
 - **Collision** — landing, sliding, ceilings, tunnelling at any speed, and an
   invariant sweep asserting the player never ends a step inside geometry.
 - **Raycasting** — exact face normals, negative coordinates, grazing diagonals,
   degenerate directions.
 - **Generation** — determinism across instances and repeat calls, bedrock
-  floor, sea level, and that trees assemble into complete shapes when adjacent
-  chunks are generated independently.
+  floor, sea level, both presets, configuration serialization, deterministic
+  structures and bonus-chest placement/loot, and that trees assemble into
+  complete shapes when adjacent chunks are generated independently.
 - **Meshing** — face culling, translucent separation, index bounds, ambient
   occlusion variance, index-type selection above 65 535 vertices.
 - **Streaming** — load/render radii, the neighbour precondition, unload and
@@ -169,7 +185,8 @@ costs a single multiply and is independent of how many chunks are on screen.
   suspended-tab clamping.
 - **Game lifecycle** — spawn placement, look input applied once per frame
   regardless of tick count, break/place rules, save/restore round-trips,
-  recovery from a snapshot that would bury or NaN the player, clean disposal.
+  one-time starter loot, Hardcore death/reload/delete semantics, recovery from
+  a snapshot that would bury or NaN the player, clean disposal.
 
 ```bash
 npm test

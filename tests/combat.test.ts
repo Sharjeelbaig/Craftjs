@@ -99,6 +99,9 @@ describe('GameMode', () => {
     expect(rulesFor(GameMode.Creative).takesDamage).toBe(false);
     expect(rulesFor(GameMode.Survival).canFly).toBe(false);
     expect(rulesFor(GameMode.Survival).takesDamage).toBe(true);
+    expect(rulesFor(GameMode.Hardcore).takesDamage).toBe(true);
+    expect(rulesFor(GameMode.Hardcore).canRespawn).toBe(false);
+    expect(rulesFor(GameMode.Hardcore).canChangeMode).toBe(false);
   });
 
   it('refuses flight in survival and restores health on leaving it', () => {

@@ -127,6 +127,20 @@ describe('Player', () => {
     expect(Player.fromSnapshot({ ...base, health: 7 }).health).toBe(7);
   });
 
+  it('preserves Hardcore death and refuses to respawn or change mode', () => {
+    const player = Player.fromSnapshot({
+      ...new Player(0, 64, 0).toSnapshot(),
+      gameMode: GameMode.Hardcore,
+      health: 0,
+    });
+
+    expect(player.isDead).toBe(true);
+    expect(player.respawn()).toBe(false);
+    expect(player.health).toBe(0);
+    expect(player.setGameMode(GameMode.Creative)).toBe(false);
+    expect(player.gameMode).toBe(GameMode.Hardcore);
+  });
+
   it('rejects an unknown movement mode from a corrupt snapshot', () => {
     const restored = Player.fromSnapshot({
       x: 0,

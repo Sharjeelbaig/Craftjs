@@ -3,6 +3,7 @@ import type { ChunkCoord } from '../world/ChunkCoord';
 import { BlockId } from '../world/BlockType';
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_MAX_Y } from '../world/WorldConstants';
 import { fbm2, random2 } from './Noise';
+import type { ChunkGenerator } from './ChunkGenerator';
 
 const SEED_HEIGHT = 0x1a2b3c4d;
 const SEED_HILLS = 0x5e6f7a8b;
@@ -27,7 +28,7 @@ const MAX_TERRAIN_HEIGHT = WORLD_MAX_Y - 24;
  * makes the world effectively unbounded while saves stay proportional to the
  * player's own edits.
  */
-export class TerrainGenerator {
+export class TerrainGenerator implements ChunkGenerator {
   readonly seed: number;
 
   private readonly heightSeed: number;

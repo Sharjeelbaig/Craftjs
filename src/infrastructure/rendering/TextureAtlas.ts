@@ -180,6 +180,19 @@ const painters: Record<number, Painter> = {
       }
     }
   },
+  [TextureId.Chest]: (tile, random) => {
+    noisyFill(tile, random, 142, 92, 42, 9);
+    for (let y = 0; y < TILE_SIZE; y++) {
+      for (let x = 0; x < TILE_SIZE; x++) {
+        const rim = x === 0 || x === TILE_SIZE - 1 || y === 0 || y === TILE_SIZE - 1;
+        const seam = y === 7;
+        if (rim || seam) setPixel(tile, x, y, 74, 48, 26);
+      }
+    }
+    for (let y = 6; y <= 10; y++) {
+      for (let x = 6; x <= 9; x++) setPixel(tile, x, y, 196, 166, 72);
+    }
+  },
 };
 
 function scatterSpecks(

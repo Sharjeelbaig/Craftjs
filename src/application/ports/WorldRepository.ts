@@ -2,6 +2,7 @@ import type { ChunkEdits } from '@domain/world/Chunk';
 import type { ChunkCoord } from '@domain/world/ChunkCoord';
 import type { PlayerSnapshot } from '@domain/player/Player';
 import type { WeatherSnapshot } from '@domain/world/Weather';
+import type { WorldCreationSettings } from '@domain/world/WorldCreationSettings';
 
 export interface WorldMetadata {
   readonly seed: number;
@@ -12,6 +13,8 @@ export interface WorldMetadata {
   readonly timeOfDay?: number;
   /** Absent in saves written before weather was introduced. */
   readonly weather?: WeatherSnapshot;
+  /** Immutable world-defining options. Absent only in legacy saves. */
+  readonly creation?: WorldCreationSettings;
 }
 
 /**

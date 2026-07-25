@@ -1,4 +1,5 @@
-import { TerrainGenerator } from '@domain/generation/TerrainGenerator';
+import type { ChunkGenerator } from '@domain/generation/ChunkGenerator';
+import { createTerrainGenerator } from '@domain/generation/ConfiguredTerrainGenerator';
 import { BlockId, BlockRegistry, HOTBAR_BLOCKS } from '@domain/world/BlockType';
 import { ChunkCoord } from '@domain/world/ChunkCoord';
 import { World } from '@domain/world/World';
@@ -13,6 +14,11 @@ import {
   type PlayerSnapshot,
 } from '@domain/player/Player';
 import { GameMode, parseGameMode } from '@domain/player/GameMode';
+import {
+  defaultWorldCreationSettings,
+  type WorldCreationSettings,
+} from '@domain/world/WorldCreationSettings';
+import { starterChestLoot, starterChestPosition } from '@domain/world/StarterChest';
 import { Inventory } from '@domain/inventory/Inventory';
 import { RECIPES, canCraft, craft } from '@domain/inventory/Crafting';
 import {
@@ -42,7 +48,7 @@ import { EntityTypeId } from '@domain/entity/EntityType';
 import type { EntityView } from './ports/GameRenderer';
 
 /** Save format version, bumped when stored records change shape. */
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 
 const AUTOSAVE_INTERVAL_SECONDS = 20;
 
@@ -137,6 +143,10 @@ export interface GameOptions {
   readonly durablePersistence: boolean;
   readonly seed?: number;
   readonly gameMode?: GameMode;
+  /** Authoritative immutable settings for a newly created or loaded world. */
+  readonly worldCreation?: WorldCreationSettings;
+  /** Optional strategy injection for headless tests or alternate composition roots. */
+  readonly generator?: ChunkGenerator;
   readonly streaming?: Partial<StreamingSettings>;
   readonly spawning?: Partial<SpawnSettings>;
   readonly onError?: (error: unknown, context: string) => void;
@@ -165,8 +175,9 @@ export class Game {
   readonly player: Player;
   readonly time: TimeOfDay;
   readonly weather: Weather;
+  readonly creationSettings: WorldCreationSettings;
 
-  private readonly generator: TerrainGenerator;
+  private readonly generator: ChunkGenerator;
   private readonly movement = new PlayerMovement();
   private readonly streamer: ChunkStreamer;
   private readonly editor: WorldEditor;
@@ -186,11 +197,12 @@ export class Game {
 
   private readonly seed: number;
   private timeSinceSave = 0;
-  private saveInFlight = false;
+  private saveInFlight: Promise<void> | null = null;
   private target: RaycastHit | null = null;
   private targetEntityName: string | null = null;
   private started = false;
   private disposed = false;
+  private worldDeleted = false;
   private frameErrors = 0;
 
   private _debugVisible = false;
@@ -202,6 +214,7 @@ export class Game {
   private readonly inventoryListeners = new Set<() => void>();
   private readonly inventoryToggleListeners = new Set<(open: boolean) => void>();
   private readonly worldStatusListeners = new Set<(status: WorldStatus) => void>();
+  private readonly exitListeners = new Set<() => void>();
   private inventoryOpen = false;
   private readonly networkViews: EntityView[] = [];
   private readonly pendingNetworkEdits = new Map<string, BlockEditMessage>();
@@ -219,15 +232,21 @@ export class Game {
         console.error(`[craftjs] ${context}`, error);
       });
 
-    // Normalised to a signed 32-bit value so the seed reported, persisted and
-    // fed to the generator are always the same number across reloads.
-    this.seed = (options.seed ?? 0) | 0;
-    this.generator = new TerrainGenerator(this.seed);
+    // Legacy constructor fields remain supported for tests and embedders, but
+    // production composition passes the complete immutable value.
+    this.creationSettings =
+      options.worldCreation ??
+      defaultWorldCreationSettings(
+        (options.seed ?? 0) | 0,
+        parseGameMode(options.gameMode, GameMode.Survival),
+      );
+    this.seed = this.creationSettings.seed;
+    this.generator = options.generator ?? createTerrainGenerator(this.creationSettings);
     this.time = new TimeOfDay(options.startTime ?? 0.08);
     this.weather = new Weather(this.seed);
 
     this.player = new Player(0.5, SEA_LEVEL + 8, 0.5);
-    this.player.gameMode = parseGameMode(options.gameMode, GameMode.Survival);
+    this.player.gameMode = this.creationSettings.gameMode;
     if (this.player.gameMode === GameMode.Creative) {
       this.player.inventory = Inventory.creativeLoadout();
     }
@@ -334,6 +353,40 @@ export class Game {
     return () => this.worldStatusListeners.delete(listener);
   }
 
+  /** Requests a presentation-owned return to the title after cleanup. */
+  onExitRequest(listener: () => void): () => void {
+    this.exitListeners.add(listener);
+    return () => this.exitListeners.delete(listener);
+  }
+
+  /**
+   * Leaves a dead Hardcore world. Deletion is explicit and scoped to this
+   * repository; returning without deletion preserves the death state.
+   */
+  async exitHardcoreWorld(deleteWorld: boolean): Promise<boolean> {
+    if (this.player.gameMode !== GameMode.Hardcore || !this.player.isDead) return false;
+    this.loop.stop();
+
+    if (deleteWorld) {
+      if (this.saveInFlight !== null) await this.saveInFlight;
+      this.worldDeleted = true;
+      try {
+        await this.repository.clear();
+      } catch (error) {
+        this.worldDeleted = false;
+        this.onError(error, 'delete world');
+        this.notify('World deletion failed — your save was not silently discarded');
+        return false;
+      }
+      await this.streamer.dispose(false);
+    } else {
+      await this.save();
+    }
+
+    for (const listener of this.exitListeners) listener();
+    return true;
+  }
+
   worldStatus(): WorldStatus {
     return { time: this.time.clock, isNight: this.time.isNight, weather: this.weather.kind };
   }
@@ -421,7 +474,13 @@ export class Game {
       this.player.setSpawnPoint(this.player.x, this.player.y, this.player.z);
     } else {
       this.restore(snapshot);
+      this.removeClaimedStarterChest();
     }
+
+    // Creation metadata is durable before the first playable frame, rather
+    // than depending on the first autosave or a clean page close.
+    await this.save();
+    if (this.disposed) return;
 
     this.emitStatus();
     this.emitInventory();
@@ -460,6 +519,7 @@ export class Game {
     this.inventoryListeners.clear();
     this.inventoryToggleListeners.clear();
     this.worldStatusListeners.clear();
+    this.exitListeners.clear();
 
     this.input.dispose();
     this.mesher.dispose();
@@ -470,34 +530,45 @@ export class Game {
 
   /** Writes player state and every chunk holding unsaved edits. */
   async save(): Promise<void> {
-    if (this.saveInFlight) return;
-    this.saveInFlight = true;
+    if (this.worldDeleted) return;
+    if (this.saveInFlight !== null) {
+      await this.saveInFlight;
+      return;
+    }
+
+    const operation = Promise.allSettled([
+      this.repository.saveMetadata({
+        seed: this.seed,
+        version: SAVE_VERSION,
+        updatedAt: Date.now(),
+        timeOfDay: this.time.fraction,
+        weather: this.weather.snapshot(),
+        creation: this.creationSettings,
+      }),
+      this.repository.savePlayer(this.player.toSnapshot()),
+      this.streamer.flush(),
+    ]).then((results) => {
+      for (const result of results) {
+        if (result.status === 'rejected') this.onError(result.reason, 'save world');
+      }
+    });
+    this.saveInFlight = operation;
     try {
-      await Promise.allSettled([
-        this.repository.saveMetadata({
-          seed: this.seed,
-          version: SAVE_VERSION,
-          updatedAt: Date.now(),
-          timeOfDay: this.time.fraction,
-          weather: this.weather.snapshot(),
-        }),
-        this.repository.savePlayer(this.player.toSnapshot()),
-        this.streamer.flush(),
-      ]);
+      await operation;
     } catch (error) {
       this.onError(error, 'save world');
     } finally {
-      this.saveInFlight = false;
+      if (this.saveInFlight === operation) this.saveInFlight = null;
       this.timeSinceSave = 0;
     }
   }
 
   /** Brings the player back at their spawn point. No-op while alive. */
   respawn(): void {
-    if (!this.player.isDead) return;
+    if (!this.player.isDead || !this.player.rules.canRespawn) return;
     this.entities.removeAll();
     this.mining.reset();
-    this.player.respawn();
+    if (!this.player.respawn()) return;
 
     // Standing where the player died is not a guarantee the spawn point is
     // still clear — they may have built over it.
@@ -511,7 +582,14 @@ export class Game {
 
   setGameMode(mode: GameMode): void {
     if (mode === this.player.gameMode) return;
-    this.player.setGameMode(mode);
+    if (!this.player.setGameMode(mode)) {
+      this.notify(
+        this.player.gameMode === GameMode.Hardcore
+          ? 'Hardcore mode cannot be changed'
+          : 'Hardcore can only be selected when creating a world',
+      );
+      return;
+    }
     this.mining.reset();
     if (!this.player.rules.attractsHostiles) this.entities.removeAll();
     this.emitStatus();
@@ -661,7 +739,7 @@ export class Game {
 
     const broken = this.mining.update(this.player, mineable, held, step);
     if (broken !== null) {
-      if (this.player.gameMode === GameMode.Survival) {
+      if (this.player.gameMode !== GameMode.Creative) {
         this.player.inventory.add(blockItem(broken));
         this.emitInventory();
       }
@@ -737,7 +815,7 @@ export class Game {
     if (this.player.rules.instantMining) {
       const hit = this.editor.findTarget(this.player);
       const result = this.editor.breakBlock(this.player);
-      if (result.ok && hit !== null && this.player.gameMode === GameMode.Survival) {
+      if (result.ok && hit !== null && this.player.gameMode !== GameMode.Creative) {
         this.player.inventory.add(blockItem(hit.block as BlockId));
         this.emitInventory();
       }
@@ -754,6 +832,8 @@ export class Game {
   }
 
   private useSelectedItem(): void {
+    if (this.tryOpenStarterChest()) return;
+
     const item = this.selectedItem;
     if (item === null) {
       this.notify('Select an item from the inventory (E)');
@@ -762,14 +842,14 @@ export class Game {
 
     if (item.kind === 'block' && item.block !== undefined) {
       if (
-        this.player.gameMode === GameMode.Survival &&
+        this.player.gameMode !== GameMode.Creative &&
         !this.player.inventory.has(item.id)
       ) {
         this.notify(`No ${item.name} left`);
         return;
       }
       const result = this.editor.placeBlock(this.player, item.block);
-      if (result.ok && this.player.gameMode === GameMode.Survival) {
+      if (result.ok && this.player.gameMode !== GameMode.Creative) {
         this.player.inventory.remove(item.id);
         this.emitInventory();
       }
@@ -798,6 +878,45 @@ export class Game {
       if (spawned === null) this.notify('Mob limit reached');
       else this.notify(`Spawned ${spawned.definition.name}`);
     }
+  }
+
+  private tryOpenStarterChest(): boolean {
+    if (!this.creationSettings.bonusChest || this.player.bonusChestClaimed) return false;
+    const hit = this.editor.findTarget(this.player);
+    if (hit === null || hit.block !== BlockId.Chest) return false;
+
+    const expected = starterChestPosition(this.generator, this.seed);
+    if (hit.x !== expected.x || hit.y !== expected.y || hit.z !== expected.z) return false;
+
+    const result = this.editor.applyBlockEdit(hit.x, hit.y, hit.z, BlockId.Air);
+    if (!result.ok) return false;
+
+    for (const loot of starterChestLoot(this.seed)) {
+      this.player.inventory.add(loot.item, loot.count);
+    }
+    this.player.bonusChestClaimed = true;
+    this.multiplayer?.publishBlockEdit({
+      x: hit.x,
+      y: hit.y,
+      z: hit.z,
+      block: BlockId.Air,
+    });
+    this.emitInventory();
+    this.notify('Starter chest collected');
+    void this.save();
+    return true;
+  }
+
+  /**
+   * The player claim is the duplicate-loot guard. Reassert the matching world
+   * edit on load as a recovery path if a prior tab closed between player and
+   * chunk persistence completing.
+   */
+  private removeClaimedStarterChest(): void {
+    if (!this.creationSettings.bonusChest || !this.player.bonusChestClaimed) return;
+    const position = starterChestPosition(this.generator, this.seed);
+    if (this.world.getBlock(position.x, position.y, position.z) !== BlockId.Chest) return;
+    this.editor.applyBlockEdit(position.x, position.y, position.z, BlockId.Air);
   }
 
   private handleDeath(cause: string): void {
@@ -962,15 +1081,21 @@ export class Game {
   }
 
   private restore(snapshot: PlayerSnapshot): void {
-    const restored = Player.fromSnapshot(snapshot);
+    const restored = Player.fromSnapshot({
+      ...snapshot,
+      // World creation mode is authoritative; a stale player record cannot
+      // turn a Hardcore world into a respawnable one on reload.
+      gameMode: this.creationSettings.gameMode,
+    });
     this.player.moveTo(restored.x, restored.y, restored.z);
     this.player.yaw = restored.yaw;
     this.player.pitch = restored.pitch;
     this.player.mode = restored.mode;
-    this.player.gameMode = restored.gameMode;
+    this.player.gameMode = this.creationSettings.gameMode;
     this.player.health = restored.health;
     this.player.setSpawnPoint(restored.spawnX, restored.spawnY, restored.spawnZ);
     this.player.inventory = restored.inventory;
+    this.player.bonusChestClaimed = restored.bonusChestClaimed;
     this.player.selectedSlot =
       Number.isInteger(restored.selectedSlot) &&
       restored.selectedSlot >= 0 &&

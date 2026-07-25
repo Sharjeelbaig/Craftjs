@@ -21,6 +21,7 @@ export const BlockId = {
   Bedrock: 11,
   Snow: 12,
   Brick: 13,
+  Chest: 14,
 } as const;
 
 export type BlockId = (typeof BlockId)[keyof typeof BlockId];
@@ -42,11 +43,12 @@ export const TextureId = {
   Bedrock: 12,
   Snow: 13,
   Brick: 14,
+  Chest: 15,
 } as const;
 
 export type TextureId = (typeof TextureId)[keyof typeof TextureId];
 
-export const TEXTURE_COUNT = 15;
+export const TEXTURE_COUNT = 16;
 
 /** Face order used everywhere: +X, -X, +Y, -Y, +Z, -Z. */
 export type FaceTextures = readonly [
@@ -171,6 +173,10 @@ const DEFINITIONS: readonly BlockDefinition[] = Object.freeze([
   }),
   define(BlockId.Snow, 'Snow', uniform(TextureId.Snow), { hardness: 0.3 }),
   define(BlockId.Brick, 'Bricks', uniform(TextureId.Brick), { hardness: 3.4 }),
+  define(BlockId.Chest, 'Starter Chest', uniform(TextureId.Chest), {
+    indestructible: true,
+    hardness: Infinity,
+  }),
 ]);
 
 const AIR_DEFINITION = DEFINITIONS[BlockId.Air];
