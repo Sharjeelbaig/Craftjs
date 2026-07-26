@@ -1,14 +1,17 @@
 import { applyDamage, applyKnockback, fallDamageFor } from '@domain/combat/Combat';
 import { stepBody } from '@domain/entity/EntityPhysics';
+import { ItemDrop } from '@domain/entity/ItemDrop';
+import { rollMobLoot } from '@domain/entity/MobLoot';
 import type { EntityTypeId } from '@domain/entity/EntityType';
 import { BrainState, Mob } from '@domain/entity/Mob';
 import { startFleeing, updateBrain } from '@domain/entity/MobBrain';
 import { MobSpawner, type SpawnSettings } from '@domain/entity/MobSpawner';
+import type { ItemId } from '@domain/inventory/Item';
 import type { Player } from '@domain/player/Player';
 import type { World } from '@domain/world/World';
 import type { TimeOfDay } from '@domain/world/TimeOfDay';
 import { WORLD_MIN_Y } from '@domain/world/WorldConstants';
-import type { EntityView } from '../ports/GameRenderer';
+import type { EntityView, ItemDropView } from '../ports/GameRenderer';
 
 /** Jump impulse creatures use to clear obstacles they cannot step over. */
 const MOB_JUMP_VELOCITY = 7.6;
@@ -21,6 +24,9 @@ const MOB_JUMP_VELOCITY = 7.6;
  * configured or how many worlds' worth of creatures drift into range.
  */
 const ABSOLUTE_ENTITY_LIMIT = 60;
+const ABSOLUTE_ITEM_DROP_LIMIT = 128;
+const ITEM_DROP_SIZE = Object.freeze({ width: 0.25, height: 0.25 });
+const ITEM_PICKUP_RADIUS_SQUARED = 1.6 * 1.6;
 
 /** Damage a creature takes from falling, per block beyond the safe distance. */
 const MOB_FALL_DAMAGE_SCALE = 1;
@@ -35,6 +41,13 @@ export interface PlayerHit {
 export interface EntityUpdateResult {
   /** Attacks that landed on the player this tick. */
   readonly playerHits: readonly PlayerHit[];
+  /** Item stacks close enough to be transferred into the player's inventory. */
+  readonly pickups: readonly ItemPickup[];
+}
+
+export interface ItemPickup {
+  readonly item: ItemId;
+  readonly count: number;
 }
 
 export interface EntityManagerOptions {
@@ -60,8 +73,11 @@ export class EntityManager {
   private readonly maxEntities: number;
 
   private readonly mobs = new Map<number, Mob>();
+  private readonly drops = new Map<number, ItemDrop>();
   private readonly hits: PlayerHit[] = [];
+  private readonly pickups: ItemPickup[] = [];
   private readonly views: EntityView[] = [];
+  private readonly dropViews: ItemDropView[] = [];
 
   constructor(options: EntityManagerOptions) {
     this.world = options.world;
@@ -78,6 +94,10 @@ export class EntityManager {
     let total = 0;
     for (const mob of this.mobs.values()) if (mob.isHostile) total++;
     return total;
+  }
+
+  get itemDropCount(): number {
+    return this.drops.size;
   }
 
   all(): IterableIterator<Mob> {
@@ -98,6 +118,7 @@ export class EntityManager {
 
   removeAll(): void {
     this.mobs.clear();
+    this.drops.clear();
   }
 
   /**
@@ -109,18 +130,22 @@ export class EntityManager {
    */
   update(player: Player, time: TimeOfDay, dt: number): EntityUpdateResult {
     this.hits.length = 0;
-    if (dt <= 0 || !Number.isFinite(dt)) return { playerHits: this.hits };
+    this.pickups.length = 0;
+    if (dt <= 0 || !Number.isFinite(dt)) {
+      return { playerHits: this.hits, pickups: this.pickups };
+    }
 
     const targetable = !player.isDead && player.rules.attractsHostiles;
 
     for (const mob of this.mobs.values()) {
       this.updateMob(mob, player, time, dt, targetable);
     }
+    this.updateDrops(player, dt);
 
     this.cull(player, time);
     this.trySpawn(player, time, dt);
 
-    return { playerHits: this.hits };
+    return { playerHits: this.hits, pickups: this.pickups };
   }
 
   private updateMob(
@@ -170,7 +195,15 @@ export class EntityManager {
 
     if (result.landedFallDistance > 0) {
       const damage = fallDamageFor(result.landedFallDistance) * MOB_FALL_DAMAGE_SCALE;
-      if (damage > 0) applyDamage(mob, damage);
+      if (damage > 0) {
+        const outcome = applyDamage(mob, damage);
+        if (outcome.fatal) {
+          this.createDrops(mob);
+          mob.removed = true;
+          this.mobs.delete(mob.id);
+          return;
+        }
+      }
     }
 
     if (brain.attack && targetable) {
@@ -208,6 +241,7 @@ export class EntityManager {
     applyKnockback(mob, fromX, fromZ, mob.x, mob.z, knockback);
 
     if (result.fatal) {
+      this.createDrops(mob);
       mob.removed = true;
       this.mobs.delete(mob.id);
       return true;
@@ -218,6 +252,68 @@ export class EntityManager {
     else mob.state = BrainState.Chase;
 
     return false;
+  }
+
+  private createDrops(mob: Mob): void {
+    for (const loot of rollMobLoot(mob.type, this.random)) {
+      if (this.drops.size >= ABSOLUTE_ITEM_DROP_LIMIT) {
+        const oldest = this.drops.keys().next().value as number | undefined;
+        if (oldest !== undefined) this.drops.delete(oldest);
+      }
+
+      const angle = this.random() * Math.PI * 2;
+      const speed = 0.8 + this.random() * 0.8;
+      const drop = new ItemDrop(
+        loot.item,
+        loot.count,
+        mob.x,
+        mob.y + Math.min(0.7, mob.definition.height * 0.5),
+        mob.z,
+        Math.cos(angle) * speed,
+        3.2 + this.random() * 1.2,
+        Math.sin(angle) * speed,
+      );
+      this.drops.set(drop.id, drop);
+    }
+  }
+
+  private updateDrops(player: Player, dt: number): void {
+    for (const drop of [...this.drops.values()]) {
+      drop.beginTick();
+      drop.age += dt;
+
+      stepBody(
+        drop,
+        this.world,
+        {
+          size: ITEM_DROP_SIZE,
+          desiredVelocityX: 0,
+          desiredVelocityZ: 0,
+          stepHeight: 0,
+          jump: false,
+          jumpVelocity: 0,
+        },
+        dt,
+      );
+
+      if (drop.expired || drop.y < WORLD_MIN_Y - 4 || !this.world.isLoadedAt(drop.x, drop.z)) {
+        this.drops.delete(drop.id);
+        continue;
+      }
+
+      const dx = drop.x - player.x;
+      const dz = drop.z - player.z;
+      if (
+        !player.isDead &&
+        drop.collectable &&
+        dx * dx + dz * dz <= ITEM_PICKUP_RADIUS_SQUARED &&
+        Math.abs(drop.y - player.y) <= 2
+      ) {
+        drop.removed = true;
+        this.drops.delete(drop.id);
+        this.pickups.push(Object.freeze({ item: drop.item, count: drop.count }));
+      }
+    }
   }
 
   /** Removes creatures that are dead, too far away, or out of the world. */
@@ -301,10 +397,28 @@ export class EntityManager {
     return this.views;
   }
 
+  /** Render-facing item stacks, kept separate from creature model ids. */
+  itemDropSnapshot(alpha: number): readonly ItemDropView[] {
+    this.dropViews.length = 0;
+    const t = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 0;
+    for (const drop of this.drops.values()) {
+      this.dropViews.push({
+        id: drop.id,
+        item: drop.item,
+        count: drop.count,
+        x: drop.previousX + (drop.x - drop.previousX) * t,
+        y: drop.previousY + (drop.y - drop.previousY) * t,
+        z: drop.previousZ + (drop.z - drop.previousZ) * t,
+        age: drop.age,
+      });
+    }
+    return this.dropViews;
+  }
+
   /** Population summary for the debug overlay. */
-  stats(): { total: number; hostile: number } {
+  stats(): { total: number; hostile: number; drops: number } {
     let hostile = 0;
     for (const mob of this.mobs.values()) if (mob.isHostile) hostile++;
-    return { total: this.mobs.size, hostile };
+    return { total: this.mobs.size, hostile, drops: this.drops.size };
   }
 }

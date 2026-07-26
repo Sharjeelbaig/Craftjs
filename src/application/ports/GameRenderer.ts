@@ -1,6 +1,7 @@
 import type { ChunkCoord } from '@domain/world/ChunkCoord';
 import type { Vec3Like } from '@domain/shared/Vec3';
 import type { EntityTypeId } from '@domain/entity/EntityType';
+import type { ItemId } from '@domain/inventory/Item';
 import type { ChunkMeshData } from './ChunkMesher';
 
 export interface CameraPose {
@@ -25,6 +26,17 @@ export interface EntityView {
   readonly walkPhase: number;
   /** True while the damage flash should show. */
   readonly hurt: boolean;
+}
+
+export interface ItemDropView {
+  readonly id: number;
+  readonly item: ItemId;
+  readonly count: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** Seconds alive; drives a deterministic bob and spin. */
+  readonly age: number;
 }
 
 /** Atmospheric state derived from the world clock. */
@@ -62,6 +74,9 @@ export interface GameRenderer {
 
   /** Replaces the set of creatures drawn this frame. */
   syncEntities(views: readonly EntityView[]): void;
+
+  /** Optional for renderers that can display collectible item stacks. */
+  syncItemDrops?(views: readonly ItemDropView[]): void;
 
   /** Highlights the block being targeted, or clears it when null. */
   setBlockHighlight(block: Vec3Like | null): void;

@@ -3,6 +3,7 @@ import type {
   CameraPose,
   EntityView,
   GameRenderer,
+  ItemDropView,
   RenderStats,
   SkyState,
 } from '@application/ports/GameRenderer';
@@ -13,6 +14,7 @@ import { CHUNK_SIZE } from '@domain/world/WorldConstants';
 import { createBlockTextureArray } from './TextureAtlas';
 import { createVoxelMaterials, type VoxelMaterials } from './VoxelMaterial';
 import { EntityLayer } from './EntityLayer';
+import { ItemDropLayer } from './ItemDropLayer';
 import { WorldRain } from './WorldRain';
 
 /** Sky palette, interpolated across the day by sun height. */
@@ -49,6 +51,7 @@ export class ThreeRenderer implements GameRenderer {
   private readonly atlas: THREE.DataArrayTexture;
   private readonly highlight: THREE.LineSegments;
   private readonly entityLayer: EntityLayer;
+  private readonly itemDropLayer: ItemDropLayer;
   private readonly rain: WorldRain;
   private readonly chunks = new Map<string, ChunkMeshes>();
 
@@ -104,6 +107,7 @@ export class ThreeRenderer implements GameRenderer {
     this.scene.add(this.highlight);
 
     this.entityLayer = new EntityLayer(this.scene, this.skyColor, this.fogNear, this.fogFar);
+    this.itemDropLayer = new ItemDropLayer(this.scene);
     this.rain = new WorldRain(this.scene);
 
     this.applyViewDistance();
@@ -271,6 +275,11 @@ export class ThreeRenderer implements GameRenderer {
     this.entityLayer.sync(views);
   }
 
+  syncItemDrops(views: readonly ItemDropView[]): void {
+    if (this.disposed) return;
+    this.itemDropLayer.sync(views);
+  }
+
   setSubmerged(submerged: boolean): void {
     if (submerged === this.submerged) return;
     this.submerged = submerged;
@@ -293,7 +302,7 @@ export class ThreeRenderer implements GameRenderer {
       drawCalls: info.calls,
       triangles: info.triangles,
       chunkMeshes: this.chunks.size,
-      entities: this.entityLayer.visibleCount,
+      entities: this.entityLayer.visibleCount + this.itemDropLayer.visibleCount,
     };
   }
 
@@ -313,6 +322,7 @@ export class ThreeRenderer implements GameRenderer {
     this.chunks.clear();
 
     this.entityLayer.dispose();
+    this.itemDropLayer.dispose();
     this.rain.dispose();
     this.highlight.geometry.dispose();
     (this.highlight.material as THREE.Material).dispose();

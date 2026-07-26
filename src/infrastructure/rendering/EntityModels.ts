@@ -162,6 +162,12 @@ const ZOMBIE_SHIRT = 0x3a5f8a;
 const ZOMBIE_LEGS = 0x38416b;
 const SPIDER_BODY = 0x2b2320;
 const SPIDER_EYES = 0xa8202a;
+const CAVE_SPIDER_BODY = 0x18333a;
+const CAVE_SPIDER_EYES = 0xd4323c;
+const SKELETON_BONE = 0xc8c4b2;
+const SKELETON_SHADOW = 0x9c998d;
+const CREEPER_GREEN = 0x5b9b42;
+const CREEPER_DARK = 0x204626;
 const PLAYER_SKIN = 0xd9a06c;
 const PLAYER_SHIRT = 0x4c92c3;
 const PLAYER_LEGS = 0x313b55;
@@ -317,6 +323,68 @@ const MODELS: Readonly<Record<EntityTypeId, EntityModel>> = Object.freeze({
         role: AnimationRole.LimbB,
         colour: PLAYER_LEGS,
       }),
+    ]),
+  }),
+
+  [EntityTypeId.Skeleton]: Object.freeze({
+    swingAmplitude: 0.72,
+    parts: Object.freeze([
+      part({ size: [8, 12, 4], pivot: [0, 18, 0], colour: SKELETON_SHADOW }),
+      part({ size: [8, 8, 8], pivot: [0, 28, 0], role: AnimationRole.Head, colour: SKELETON_BONE }),
+      part({ size: [2, 2, 1], pivot: [-2, 29, -4.5], role: AnimationRole.Head, colour: 0x242424 }),
+      part({ size: [2, 2, 1], pivot: [2, 29, -4.5], role: AnimationRole.Head, colour: 0x242424 }),
+      part({
+        size: [3, 12, 3],
+        pivot: [-5.5, 23, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbB,
+        colour: SKELETON_BONE,
+      }),
+      part({
+        size: [3, 12, 3],
+        pivot: [5.5, 23, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbA,
+        colour: SKELETON_BONE,
+      }),
+      part({
+        size: [3, 12, 3],
+        pivot: [-2, 12, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbA,
+        colour: SKELETON_BONE,
+      }),
+      part({
+        size: [3, 12, 3],
+        pivot: [2, 12, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbB,
+        colour: SKELETON_BONE,
+      }),
+    ]),
+  }),
+
+  [EntityTypeId.Creeper]: Object.freeze({
+    swingAmplitude: 0.45,
+    parts: Object.freeze([
+      part({ size: [8, 12, 4], pivot: [0, 14, 0], colour: CREEPER_GREEN }),
+      part({ size: [8, 8, 8], pivot: [0, 24, 0], role: AnimationRole.Head, colour: CREEPER_GREEN }),
+      part({ size: [2, 2, 1], pivot: [-2, 25, -4.5], role: AnimationRole.Head, colour: CREEPER_DARK }),
+      part({ size: [2, 2, 1], pivot: [2, 25, -4.5], role: AnimationRole.Head, colour: CREEPER_DARK }),
+      part({ size: [3, 3, 1], pivot: [0, 21.5, -4.5], role: AnimationRole.Head, colour: CREEPER_DARK }),
+      ...quadrupedLegs(4, 6, 2, 2, 6, 0x4f8839),
+    ]),
+  }),
+
+  [EntityTypeId.CaveSpider]: Object.freeze({
+    swingAmplitude: 0.42,
+    parts: Object.freeze([
+      part({ size: [8, 5, 9], pivot: [0, 5, 4], colour: CAVE_SPIDER_BODY }),
+      part({ size: [7, 5, 5], pivot: [0, 5, -3], colour: 0x21464d }),
+      part({ size: [6, 4, 6], pivot: [0, 5, -7], role: AnimationRole.Head, colour: CAVE_SPIDER_BODY }),
+      part({ size: [2, 1, 1], pivot: [-1.7, 6, -10.5], role: AnimationRole.Head, colour: CAVE_SPIDER_EYES }),
+      part({ size: [2, 1, 1], pivot: [1.7, 6, -10.5], role: AnimationRole.Head, colour: CAVE_SPIDER_EYES }),
+      ...spiderLegs(0x162f35),
     ]),
   }),
 });

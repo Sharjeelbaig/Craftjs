@@ -2,12 +2,14 @@ import type { WorldMetadata, WorldRepository } from '@application/ports/WorldRep
 import type { ChunkEdits } from '@domain/world/Chunk';
 import type { ChunkCoord } from '@domain/world/ChunkCoord';
 import type { PlayerSnapshot } from '@domain/player/Player';
-
-const DATABASE_NAME = 'craftjs';
-const DATABASE_VERSION = 1;
-
-const STORE_CHUNKS = 'chunks';
-const STORE_STATE = 'state';
+import {
+  DATABASE_NAME,
+  DATABASE_VERSION,
+  STORE_CHUNKS,
+  STORE_STATE,
+  ensureCraftjsSchema,
+  promisifyRequest,
+} from './IndexedDbSchema';
 
 /** Highest code unit, used as the exclusive upper bound of a key prefix scan. */
 const KEY_MAX = '￿';
@@ -16,13 +18,6 @@ const KEY_MAX = '￿';
 interface StoredChunk {
   readonly indices: Uint16Array;
   readonly blocks: Uint8Array;
-}
-
-function promisify<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
-  });
 }
 
 /**
@@ -70,15 +65,7 @@ export class IndexedDbWorldRepository implements WorldRepository {
         return;
       }
 
-      request.onupgradeneeded = () => {
-        const database = request.result;
-        if (!database.objectStoreNames.contains(STORE_CHUNKS)) {
-          database.createObjectStore(STORE_CHUNKS);
-        }
-        if (!database.objectStoreNames.contains(STORE_STATE)) {
-          database.createObjectStore(STORE_STATE);
-        }
-      };
+      request.onupgradeneeded = () => ensureCraftjsSchema(request.result);
 
       request.onsuccess = () => {
         const database = request.result;
@@ -120,7 +107,7 @@ export class IndexedDbWorldRepository implements WorldRepository {
       transaction.onerror = () =>
         reject(transaction.error ?? new Error('IndexedDB transaction failed'));
 
-      promisify(request).then(resolve, reject);
+      promisifyRequest(request).then(resolve, reject);
     });
   }
 

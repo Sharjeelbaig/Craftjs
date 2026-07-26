@@ -86,6 +86,7 @@ export interface GameDebugInfo {
   readonly triangles: number;
   readonly entities: number;
   readonly hostiles: number;
+  readonly itemDrops: number;
   readonly targetBlock: string | null;
   readonly targetEntity: string | null;
   readonly persistence: 'durable' | 'memory';
@@ -528,6 +529,13 @@ export class Game {
     this.multiplayer?.dispose();
   }
 
+  /** Explicit manual-save-and-exit semantic used by world management clients. */
+  async saveAndExit(): Promise<void> {
+    if (this.disposed) return;
+    this.loop.stop();
+    await this.dispose();
+  }
+
   /** Writes player state and every chunk holding unsaved edits. */
   async save(): Promise<void> {
     if (this.worldDeleted) return;
@@ -627,6 +635,7 @@ export class Game {
       triangles: stats.triangles,
       entities: population.total,
       hostiles: population.hostile,
+      itemDrops: population.drops,
       targetBlock: this.target === null ? null : BlockRegistry.get(this.target.block).name,
       targetEntity: this.targetEntityName,
       persistence: this.durablePersistence ? 'durable' : 'memory',
@@ -708,6 +717,18 @@ export class Game {
         this.handleDeath(`slain by a ${creatures.playerHits[0].attacker}`);
       }
       this.emitStatus();
+    }
+    if (creatures.pickups.length > 0) {
+      const collected: string[] = [];
+      for (const pickup of creatures.pickups) {
+        if (!this.player.inventory.add(pickup.item, pickup.count)) continue;
+        const name = itemDefinition(pickup.item)?.name ?? 'item';
+        collected.push(`${pickup.count} ${name}`);
+      }
+      if (collected.length > 0) {
+        this.emitInventory();
+        this.notify(`Collected ${collected.join(', ')}`);
+      }
     }
 
     this.updateTargeting();
@@ -960,6 +981,7 @@ export class Game {
       });
     }
     this.renderer.syncEntities(this.networkViews);
+    this.renderer.syncItemDrops?.(this.entities.itemDropSnapshot(alpha));
     this.multiplayer?.publishPresence({
       name: 'Player',
       x,

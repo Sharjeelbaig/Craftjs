@@ -100,7 +100,7 @@ export class MobSpawner {
       const point = this.samplePosition(context);
       if (point === null) continue;
 
-      const definition = pool[Math.floor(context.random() * pool.length) % pool.length];
+      const definition = chooseWeighted(pool, context.random());
       if (!this.isValidGround(context.world, point.x, point.y, point.z, definition)) continue;
 
       return this.buildGroup(context, definition, point, remaining);
@@ -187,4 +187,20 @@ export class MobSpawner {
 
     return requests;
   }
+}
+
+function chooseWeighted(
+  pool: readonly EntityDefinition[],
+  random: number,
+): EntityDefinition {
+  let total = 0;
+  for (const definition of pool) total += Math.max(0, definition.spawnWeight);
+  if (total <= 0) return pool[0];
+
+  let cursor = Math.max(0, Math.min(0.999999999, random)) * total;
+  for (const definition of pool) {
+    cursor -= Math.max(0, definition.spawnWeight);
+    if (cursor < 0) return definition;
+  }
+  return pool[pool.length - 1];
 }

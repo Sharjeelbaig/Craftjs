@@ -14,6 +14,9 @@ export const EntityTypeId = {
   Spider: 5,
   /** Presentation-only avatar received from a multiplayer peer. */
   RemotePlayer: 6,
+  Skeleton: 7,
+  Creeper: 8,
+  CaveSpider: 9,
 } as const;
 
 export type EntityTypeId = (typeof EntityTypeId)[keyof typeof EntityTypeId];
@@ -54,6 +57,8 @@ export interface EntityDefinition {
   /** Group size when a spawn attempt succeeds. */
   readonly groupMin: number;
   readonly groupMax: number;
+  /** Relative chance within the creature's spawn pool. */
+  readonly spawnWeight: number;
 
   /** Hostiles despawn at sunrise rather than lingering into the day. */
   readonly despawnsAtDawn: boolean;
@@ -83,6 +88,7 @@ function define(
     detectionRange: 0,
     groupMin: 2,
     groupMax: 4,
+    spawnWeight: 1,
     despawnsAtDawn: false,
     walkCycleScale: 2.6,
     ...overrides,
@@ -156,6 +162,53 @@ const DEFINITIONS: readonly EntityDefinition[] = Object.freeze([
     moveSpeed: 4.3,
     groupMin: 0,
     groupMax: 0,
+  }),
+  define(EntityTypeId.Skeleton, 'Skeleton', Temperament.Hostile, {
+    width: 0.6,
+    height: 1.99,
+    maxHealth: 20,
+    moveSpeed: 2.2,
+    sprintMultiplier: 1,
+    attackDamage: 3,
+    attackRange: 0.8,
+    attackCooldown: 1.2,
+    detectionRange: 24,
+    groupMin: 1,
+    groupMax: 2,
+    despawnsAtDawn: true,
+    walkCycleScale: 2.5,
+  }),
+  define(EntityTypeId.Creeper, 'Creeper', Temperament.Hostile, {
+    width: 0.6,
+    height: 1.7,
+    maxHealth: 20,
+    moveSpeed: 2.15,
+    sprintMultiplier: 1,
+    attackDamage: 7,
+    attackRange: 0.65,
+    attackCooldown: 1.5,
+    detectionRange: 20,
+    groupMin: 1,
+    groupMax: 2,
+    spawnWeight: 0.8,
+    despawnsAtDawn: true,
+    walkCycleScale: 2.5,
+  }),
+  define(EntityTypeId.CaveSpider, 'Cave Spider', Temperament.Hostile, {
+    width: 0.75,
+    height: 0.5,
+    maxHealth: 12,
+    moveSpeed: 3.4,
+    sprintMultiplier: 1,
+    attackDamage: 2,
+    attackRange: 0.65,
+    attackCooldown: 0.75,
+    detectionRange: 18,
+    groupMin: 1,
+    groupMax: 2,
+    spawnWeight: 0.4,
+    despawnsAtDawn: false,
+    walkCycleScale: 5.6,
   }),
 ]);
 

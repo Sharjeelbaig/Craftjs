@@ -3,12 +3,14 @@ import './presentation/styles.css';
 import { Game } from '@application/Game';
 import type { WorldMetadata, WorldRepository } from '@application/ports/WorldRepository';
 import { settingsForWorld } from '@application/services/WorldCreationService';
+import { WorldManagementService } from '@application/services/WorldManagementService';
 import { GameMode, parseGameMode } from '@domain/player/GameMode';
 import type { PlayerSnapshot } from '@domain/player/Player';
 import { seedFromString } from '@domain/generation/Noise';
 import { BrowserInput } from '@infrastructure/input/BrowserInput';
 import { WorkerChunkMesher } from '@infrastructure/meshing/WorkerChunkMesher';
 import { IndexedDbWorldRepository } from '@infrastructure/persistence/IndexedDbWorldRepository';
+import { IndexedDbWorldCatalog } from '@infrastructure/persistence/IndexedDbWorldCatalog';
 import { InMemoryWorldRepository } from '@infrastructure/persistence/InMemoryWorldRepository';
 import { ThreeRenderer } from '@infrastructure/rendering/ThreeRenderer';
 import { Hud } from '@presentation/Hud';
@@ -148,6 +150,22 @@ async function bootstrap(): Promise<void> {
   const worldCreation = settingsForWorld(metadata, requestedSettings, player?.gameMode);
   const seed = worldCreation.seed;
   if (durable) writeSetting(LAST_SEED_KEY, String(seed));
+  let worldManagement: WorldManagementService | null = null;
+  if (durable) {
+    try {
+      worldManagement = new WorldManagementService(
+        new IndexedDbWorldCatalog(),
+        (id) => new IndexedDbWorldRepository(id),
+      );
+      // Seed-keyed saves are registered, not rewritten. Future non-UI clients
+      // can create distinct ids even when their generation seeds are equal.
+      await worldManagement.registerExisting(String(seed), worldCreation);
+    } catch (error) {
+      worldManagement?.dispose();
+      worldManagement = null;
+      console.warn('[craftjs] world catalogue unavailable; direct save still works', error);
+    }
+  }
   const renderDistance = renderDistanceFromQuery();
 
   let renderer: ThreeRenderer;
@@ -155,6 +173,7 @@ async function bootstrap(): Promise<void> {
     renderer = new ThreeRenderer(canvas, renderDistance);
   } catch (error) {
     repository.dispose();
+    worldManagement?.dispose();
     showFatalError(
       'WebGL is unavailable',
       'Craftjs needs WebGL 2 to render. Enable hardware acceleration or try a different browser.',
@@ -193,7 +212,10 @@ async function bootstrap(): Promise<void> {
     if (exiting) return;
     exiting = true;
     hud.dispose();
-    void game.dispose().finally(() => globalThis.location.reload());
+    void game.dispose().finally(() => {
+      worldManagement?.dispose();
+      globalThis.location.reload();
+    });
   });
 
   // Pointer lock is the single source of truth for "is the player playing".
@@ -234,7 +256,15 @@ async function bootstrap(): Promise<void> {
   await game.start();
 
   // Exposed for debugging from the console; not part of any public contract.
-  Reflect.set(globalThis, 'craftjs', { game, renderer, input, mesher, hud });
+  Reflect.set(globalThis, 'craftjs', {
+    game,
+    renderer,
+    input,
+    mesher,
+    hud,
+    /** Non-UI world lifecycle API: list/create/open/rename/delete. */
+    worlds: worldManagement,
+  });
 }
 
 bootstrap().catch((error: unknown) => {
