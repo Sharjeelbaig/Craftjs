@@ -16,7 +16,7 @@ describe('inventory icon assets', () => {
   ];
 
   it('has a transformed SVG for every item visible in the creative catalogue', () => {
-    expect(inventoryItems).toHaveLength(146);
+    expect(inventoryItems).toHaveLength(154);
     for (const item of inventoryItems) {
       const path = join(process.cwd(), 'public', inventoryIconPath(item));
       expect(existsSync(path), `missing ${path}`).toBe(true);

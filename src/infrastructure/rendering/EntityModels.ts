@@ -171,6 +171,12 @@ const CREEPER_DARK = 0x204626;
 const PLAYER_SKIN = 0xd9a06c;
 const PLAYER_SHIRT = 0x4c92c3;
 const PLAYER_LEGS = 0x313b55;
+const HORSE_COAT = 0x8a6448;
+const HORSE_MANE = 0x4a3222;
+const HORSE_HOOF = 0x3b2a1d;
+const CART_IRON = 0x9aa0a6;
+const CART_IRON_DARK = 0x6d7378;
+const CART_WHEEL = 0x4b4f53;
 
 const MODELS: Readonly<Record<EntityTypeId, EntityModel>> = Object.freeze({
   [EntityTypeId.Pig]: Object.freeze({
@@ -385,6 +391,59 @@ const MODELS: Readonly<Record<EntityTypeId, EntityModel>> = Object.freeze({
       part({ size: [2, 1, 1], pivot: [-1.7, 6, -10.5], role: AnimationRole.Head, colour: CAVE_SPIDER_EYES }),
       part({ size: [2, 1, 1], pivot: [1.7, 6, -10.5], role: AnimationRole.Head, colour: CAVE_SPIDER_EYES }),
       ...spiderLegs(0x162f35),
+    ]),
+  }),
+
+  [EntityTypeId.Horse]: Object.freeze({
+    swingAmplitude: 0.58,
+    parts: Object.freeze([
+      part({ size: [11, 11, 22], pivot: [0, 19, 0], colour: HORSE_COAT }),
+      // Neck rises forward from the shoulder, with the head on its end.
+      part({
+        size: [5, 14, 6],
+        pivot: [0, 24, -8],
+        centre: [0, 4, -2],
+        rotation: [-0.62, 0, 0],
+        role: AnimationRole.Head,
+        colour: HORSE_COAT,
+      }),
+      part({ size: [5, 6, 10], pivot: [0, 32, -14], role: AnimationRole.Head, colour: HORSE_COAT }),
+      part({ size: [2, 3, 2], pivot: [-1.6, 35.5, -12], role: AnimationRole.Head, colour: HORSE_COAT }),
+      part({ size: [2, 3, 2], pivot: [1.6, 35.5, -12], role: AnimationRole.Head, colour: HORSE_COAT }),
+      // Mane along the neck and a tail off the rump.
+      part({
+        size: [2, 14, 5],
+        pivot: [0, 25, -7],
+        centre: [0, 4, 0],
+        rotation: [-0.62, 0, 0],
+        role: AnimationRole.Head,
+        colour: HORSE_MANE,
+      }),
+      part({
+        size: [3, 12, 3],
+        pivot: [0, 26, 11],
+        centre: [0, -5, 1],
+        rotation: [0.45, 0, 0],
+        colour: HORSE_MANE,
+      }),
+      ...quadrupedLegs(4, 14, 4, 8, 14, HORSE_COAT),
+      ...quadrupedLegs(4.4, 3, 4, 8, 3, HORSE_HOOF),
+    ]),
+  }),
+
+  [EntityTypeId.Minecart]: Object.freeze({
+    // A cart has no limbs to swing; the wheels are fixed to the body.
+    swingAmplitude: 0,
+    parts: Object.freeze([
+      part({ size: [16, 2, 16], pivot: [0, 4, 0], colour: CART_IRON_DARK }),
+      part({ size: [16, 8, 2], pivot: [0, 9, -7], colour: CART_IRON }),
+      part({ size: [16, 8, 2], pivot: [0, 9, 7], colour: CART_IRON }),
+      part({ size: [2, 8, 16], pivot: [-7, 9, 0], colour: CART_IRON }),
+      part({ size: [2, 8, 16], pivot: [7, 9, 0], colour: CART_IRON }),
+      part({ size: [4, 4, 2], pivot: [-5, 2, -5], colour: CART_WHEEL }),
+      part({ size: [4, 4, 2], pivot: [5, 2, -5], colour: CART_WHEEL }),
+      part({ size: [4, 4, 2], pivot: [-5, 2, 5], colour: CART_WHEEL }),
+      part({ size: [4, 4, 2], pivot: [5, 2, 5], colour: CART_WHEEL }),
     ]),
   }),
 });

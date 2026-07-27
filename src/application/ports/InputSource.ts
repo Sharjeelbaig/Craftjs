@@ -8,9 +8,11 @@ export const InputAction = {
   ToggleInventory: 'toggleInventory',
   /** Left click: attacks a creature if one is targeted, else starts mining. */
   Attack: 'attack',
-  /** Right click: places the selected block. */
+  /** Right click: places the selected block, or interacts with what is aimed at. */
   Use: 'use',
   Respawn: 'respawn',
+  /** Leaves a horse or minecart. Ignored when the player is on foot. */
+  Dismount: 'dismount',
 } as const;
 
 export type InputAction = (typeof InputAction)[keyof typeof InputAction];

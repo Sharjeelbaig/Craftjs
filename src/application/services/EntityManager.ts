@@ -2,10 +2,12 @@ import { applyDamage, applyKnockback, fallDamageFor } from '@domain/combat/Comba
 import { stepBody } from '@domain/entity/EntityPhysics';
 import { ItemDrop } from '@domain/entity/ItemDrop';
 import { rollMobLoot } from '@domain/entity/MobLoot';
-import type { EntityTypeId } from '@domain/entity/EntityType';
+import { EntityRegistry, type EntityTypeId } from '@domain/entity/EntityType';
 import { BrainState, Mob } from '@domain/entity/Mob';
-import { startFleeing, updateBrain } from '@domain/entity/MobBrain';
-import { MobSpawner, type SpawnSettings } from '@domain/entity/MobSpawner';
+import { startFleeing, turnToward, updateBrain } from '@domain/entity/MobBrain';
+import { MobSpawner, isSkyExposed, type SpawnSettings } from '@domain/entity/MobSpawner';
+import { driveRailCart, steerMount, type VehicleOutput } from '@domain/entity/Vehicle';
+import type { PlayerIntent } from '@domain/player/PlayerIntent';
 import type { ItemId } from '@domain/inventory/Item';
 import type { Player } from '@domain/player/Player';
 import type { World } from '@domain/world/World';
@@ -24,12 +26,31 @@ const MOB_JUMP_VELOCITY = 7.6;
  * configured or how many worlds' worth of creatures drift into range.
  */
 const ABSOLUTE_ENTITY_LIMIT = 60;
+
+/**
+ * Separate ceiling for player-placed entities.
+ *
+ * Carts are exempt from despawning, so counting them against the creature cap
+ * would let a long rail line quietly stop the world spawning any wildlife.
+ */
+const MAX_PLACED_ENTITIES = 16;
 const ABSOLUTE_ITEM_DROP_LIMIT = 128;
 const ITEM_DROP_SIZE = Object.freeze({ width: 0.25, height: 0.25 });
 const ITEM_PICKUP_RADIUS_SQUARED = 1.6 * 1.6;
 
 /** Damage a creature takes from falling, per block beyond the safe distance. */
 const MOB_FALL_DAMAGE_SCALE = 1;
+
+/**
+ * Interval between shelter samples per creature.
+ *
+ * The test scans a whole column, so running it every tick for every creature
+ * would cost more than the rest of the entity update combined.
+ */
+const SHELTER_SAMPLE_SECONDS = 0.5;
+
+/** How fast a ridden mount swings round to the rider's chosen heading. */
+const RIDDEN_TURN_RATE = 8;
 
 export interface PlayerHit {
   readonly amount: number;
@@ -48,6 +69,13 @@ export interface EntityUpdateResult {
 export interface ItemPickup {
   readonly item: ItemId;
   readonly count: number;
+}
+
+/** What the rider is asking their mount to do this tick. */
+export interface RideControl {
+  readonly intent: PlayerIntent;
+  /** Where the rider is looking; mounts steer by camera, not by their own facing. */
+  readonly yaw: number;
 }
 
 export interface EntityManagerOptions {
@@ -74,6 +102,8 @@ export class EntityManager {
 
   private readonly mobs = new Map<number, Mob>();
   private readonly drops = new Map<number, ItemDrop>();
+  /** Id of the entity the player is sitting on, or null when on foot. */
+  private riddenId: number | null = null;
   private readonly hits: PlayerHit[] = [];
   private readonly pickups: ItemPickup[] = [];
   private readonly views: EntityView[] = [];
@@ -104,21 +134,83 @@ export class EntityManager {
     return this.mobs.values();
   }
 
+  /**
+   * Distance to the closest living hostile, or null when none exist.
+   *
+   * Sleeping needs this, and reading it here keeps the caller from having to
+   * iterate the population and know what counts as hostile.
+   */
+  nearestHostileDistance(x: number, y: number, z: number): number | null {
+    let closest = Number.POSITIVE_INFINITY;
+    for (const mob of this.mobs.values()) {
+      if (!mob.isAlive || !mob.isHostile) continue;
+      closest = Math.min(closest, mob.distanceSquaredTo(x, y, z));
+    }
+    return Number.isFinite(closest) ? Math.sqrt(closest) : null;
+  }
+
   get(id: number): Mob | null {
     return this.mobs.get(id) ?? null;
   }
 
+  /** Placed objects such as minecarts, which do not count as wildlife. */
+  get placedCount(): number {
+    let total = 0;
+    for (const mob of this.mobs.values()) if (mob.definition.placedByPlayer) total++;
+    return total;
+  }
+
   /** Adds a creature directly. Used by the spawner and by tests. */
   spawn(type: EntityTypeId, x: number, y: number, z: number, yaw = 0): Mob | null {
-    if (this.mobs.size >= this.maxEntities) return null;
+    if (EntityRegistry.isPlacedByPlayer(type)) {
+      if (this.placedCount >= MAX_PLACED_ENTITIES) return null;
+    } else if (this.creatureCount >= this.maxEntities) {
+      return null;
+    }
+
     const mob = new Mob(type, x, y, z, yaw);
     this.mobs.set(mob.id, mob);
     return mob;
   }
 
+  /** Live wildlife, excluding anything the player placed. */
+  private get creatureCount(): number {
+    let total = 0;
+    for (const mob of this.mobs.values()) if (!mob.definition.placedByPlayer) total++;
+    return total;
+  }
+
   removeAll(): void {
     this.mobs.clear();
     this.drops.clear();
+    this.riddenId = null;
+  }
+
+  /** The entity the player is riding, or null. */
+  get ridden(): Mob | null {
+    if (this.riddenId === null) return null;
+    const mob = this.mobs.get(this.riddenId) ?? null;
+    // A mount that died or despawned drops its rider rather than leaving the
+    // player welded to a ghost.
+    if (mob === null || !mob.isAlive) {
+      this.riddenId = null;
+      return null;
+    }
+    return mob;
+  }
+
+  /** Seats the player on a rideable entity. */
+  mount(mob: Mob): boolean {
+    if (!mob.isAlive || !mob.definition.rideable) return false;
+    this.riddenId = mob.id;
+    return true;
+  }
+
+  /** Stands the player up. Returns the entity they were on, if any. */
+  dismount(): Mob | null {
+    const mob = this.ridden;
+    this.riddenId = null;
+    return mob;
   }
 
   /**
@@ -128,7 +220,12 @@ export class EntityManager {
    * so damage rules stay in one place and this stays testable without a
    * player-damage pipeline.
    */
-  update(player: Player, time: TimeOfDay, dt: number): EntityUpdateResult {
+  update(
+    player: Player,
+    time: TimeOfDay,
+    dt: number,
+    ride: RideControl | null = null,
+  ): EntityUpdateResult {
     this.hits.length = 0;
     this.pickups.length = 0;
     if (dt <= 0 || !Number.isFinite(dt)) {
@@ -136,9 +233,11 @@ export class EntityManager {
     }
 
     const targetable = !player.isDead && player.rules.attractsHostiles;
+    const ridden = this.ridden;
 
     for (const mob of this.mobs.values()) {
-      this.updateMob(mob, player, time, dt, targetable);
+      if (mob === ridden && ride !== null) this.updateRidden(mob, ride, dt);
+      else this.updateMob(mob, player, time, dt, targetable);
     }
     this.updateDrops(player, dt);
 
@@ -146,6 +245,57 @@ export class EntityManager {
     this.trySpawn(player, time, dt);
 
     return { playerHits: this.hits, pickups: this.pickups };
+  }
+
+  /**
+   * Advances the entity the player is steering.
+   *
+   * The brain is bypassed entirely: a driven vehicle has no wandering or
+   * hunting to do, and letting a brain run alongside rider input would fight it
+   * for the same velocity every tick.
+   */
+  private updateRidden(mob: Mob, ride: RideControl, dt: number): void {
+    mob.beginTick();
+    const definition = mob.definition;
+
+    let output: VehicleOutput;
+    if (definition.railBound) {
+      const drive = driveRailCart(
+        mob,
+        definition,
+        ride.intent,
+        ride.yaw,
+        mob.railSpeed,
+        dt,
+        this.world,
+      );
+      mob.railSpeed = drive.railSpeed;
+      output = drive;
+    } else {
+      output = steerMount(mob, definition, ride.intent, ride.yaw);
+    }
+
+    const result = stepBody(
+      mob,
+      this.world,
+      {
+        size: { width: definition.width, height: definition.height },
+        desiredVelocityX: output.desiredVelocityX,
+        desiredVelocityZ: output.desiredVelocityZ,
+        stepHeight: definition.stepHeight,
+        jump: output.jump,
+        jumpVelocity: MOB_JUMP_VELOCITY,
+      },
+      dt,
+    );
+
+    mob.blockedLastTick = result.blocked;
+    mob.moving = output.desiredVelocityX !== 0 || output.desiredVelocityZ !== 0;
+    const travelled = Math.hypot(mob.x - mob.previousX, mob.z - mob.previousZ);
+    mob.walkPhase += travelled * definition.walkCycleScale;
+
+    // Turn the body toward the direction the rider chose.
+    turnToward(mob, dt, RIDDEN_TURN_RATE);
   }
 
   private updateMob(
@@ -159,12 +309,18 @@ export class EntityManager {
 
     mob.beginTick();
 
+    mob.shelterTimer -= dt;
+    if (mob.shelterTimer <= 0) {
+      mob.shelterTimer = SHELTER_SAMPLE_SECONDS;
+      mob.sheltered = !isSkyExposed(this.world, mob.x, mob.y, mob.z);
+    }
+
     const brain = updateBrain(mob, {
       playerX: player.x,
       playerY: player.y,
       playerZ: player.z,
       playerTargetable: targetable,
-      isNight: time.isNight,
+      isDark: time.isNight || mob.sheltered,
       blocked: mob.blockedLastTick,
       random: this.random,
       dt,
@@ -244,6 +400,7 @@ export class EntityManager {
       this.createDrops(mob);
       mob.removed = true;
       this.mobs.delete(mob.id);
+      if (this.riddenId === mob.id) this.riddenId = null;
       return true;
     }
 
@@ -324,8 +481,14 @@ export class EntityManager {
     for (const mob of [...this.mobs.values()]) {
       if (!mob.isAlive) {
         this.mobs.delete(mob.id);
+        if (this.riddenId === mob.id) this.riddenId = null;
         continue;
       }
+
+      // Whatever the player is sitting on stays, whatever the rules say: having
+      // a mount evaporate underneath the rider is never the right answer. The
+      // same holds for anything the player put there deliberately.
+      if (mob.id === this.riddenId || mob.definition.placedByPlayer) continue;
 
       // Fell out of the world, or drifted into terrain that has unloaded.
       if (mob.y < WORLD_MIN_Y - 4 || !this.world.isLoadedAt(mob.x, mob.z)) {
@@ -338,8 +501,10 @@ export class EntityManager {
         continue;
       }
 
-      // Night creatures do not linger into the morning.
-      if (day && mob.definition.despawnsAtDawn) {
+      // Night creatures do not linger into the morning — but one standing in a
+      // cave or a roofed base is still in the dark, and removing it would empty
+      // out every mine the moment the sun came up.
+      if (day && mob.definition.despawnsAtDawn && isSkyExposed(this.world, mob.x, mob.y, mob.z)) {
         this.mobs.delete(mob.id);
       }
     }
@@ -347,26 +512,31 @@ export class EntityManager {
 
   private trySpawn(player: Player, time: TimeOfDay, dt: number): void {
     if (!this.spawner.tick(dt)) return;
-    if (this.mobs.size >= this.maxEntities) return;
-    // Nothing hunts a player who cannot be hurt.
-    if (!player.rules.attractsHostiles && time.isNight) return;
 
     let hostile = 0;
-    for (const mob of this.mobs.values()) if (mob.isHostile) hostile++;
+    let creatures = 0;
+    for (const mob of this.mobs.values()) {
+      if (mob.definition.placedByPlayer) continue;
+      creatures++;
+      if (mob.isHostile) hostile++;
+    }
+    if (creatures >= this.maxEntities) return;
 
     const requests = this.spawner.plan({
       world: this.world,
       playerX: player.x,
+      playerY: player.y,
       playerZ: player.z,
       isNight: time.isNight,
-      passiveCount: this.mobs.size - hostile,
+      // Nothing hunts a player who cannot be hurt.
+      hostilesAllowed: player.rules.attractsHostiles,
+      passiveCount: creatures - hostile,
       hostileCount: hostile,
       random: this.random,
     });
 
     for (const request of requests) {
-      if (this.mobs.size >= this.maxEntities) break;
-      this.spawn(request.type, request.x, request.y, request.z, request.yaw);
+      if (this.spawn(request.type, request.x, request.y, request.z, request.yaw) === null) break;
     }
   }
 

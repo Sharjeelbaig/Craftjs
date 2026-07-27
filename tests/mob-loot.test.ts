@@ -13,7 +13,7 @@ import { World } from '@domain/world/World';
 import { CHUNK_SIZE } from '@domain/world/WorldConstants';
 
 describe('PSP creature catalogue', () => {
-  it('contains the nine shipped spawn-egg creatures and excludes remote players', () => {
+  it('contains every spawn-egg creature and excludes vehicles and remote players', () => {
     const names = [
       ...EntityRegistry.spawnable('passive'),
       ...EntityRegistry.spawnable('hostile'),
@@ -24,6 +24,7 @@ describe('PSP creature catalogue', () => {
       'Cow',
       'Chicken',
       'Sheep',
+      'Horse',
       'Zombie',
       'Spider',
       'Skeleton',

@@ -27,6 +27,7 @@ export type ResourceItemId = (typeof ResourceItemId)[keyof typeof ResourceItemId
 export type InventoryItemKind = 'resource' | 'food' | 'tool' | 'equipment' | 'utility';
 
 const ADDITIONAL_ITEM_DEFINITIONS = [
+  ['minecart', 'Minecart', 'utility'],
   ['cooked-chicken', 'Cooked Chicken', 'food'],
   ['cooked-mutton', 'Cooked Mutton', 'food'],
   ['cooked-porkchop', 'Cooked Porkchop', 'food'],
@@ -275,7 +276,7 @@ function addResource(id: ResourceItemId, name: string, colour: number): void {
 function maxStackFor(name: string, kind: InventoryItemKind): number {
   if (kind === 'tool' || kind === 'equipment') return 1;
   if (
-    /Bucket|Compass|Clock|Saddle|Music Disc|Mushroom Stew|Milk|Cake/u.test(name)
+    /Bucket|Compass|Clock|Saddle|Minecart|Music Disc|Mushroom Stew|Milk|Cake/u.test(name)
   ) {
     return 1;
   }

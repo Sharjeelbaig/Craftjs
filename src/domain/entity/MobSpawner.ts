@@ -1,6 +1,6 @@
 import { BlockId, BlockRegistry } from '../world/BlockType';
 import type { World } from '../world/World';
-import { WORLD_MAX_Y } from '../world/WorldConstants';
+import { CHUNK_HEIGHT, WORLD_MAX_Y } from '../world/WorldConstants';
 import {
   HOSTILE_TYPES,
   PASSIVE_TYPES,
@@ -29,34 +29,62 @@ export interface SpawnSettings {
   readonly cycleSeconds: number;
   /** Creatures beyond this distance are removed. */
   readonly despawnRadius: number;
+  /**
+   * Whether hostiles may appear in sheltered darkness during the day. Without
+   * this the only way to meet one is to survive until nightfall above ground.
+   */
+  readonly darkSpawns: boolean;
+  /** Lowest level searched when looking for a sheltered spawn. */
+  readonly undergroundFloor: number;
 }
 
 export const DEFAULT_SPAWN_SETTINGS: SpawnSettings = Object.freeze({
-  minRadius: 22,
-  maxRadius: 46,
+  // Close enough to be seen and heard on a night with fog, far enough that
+  // nothing materialises in the player's face.
+  minRadius: 14,
+  maxRadius: 44,
   maxPassive: 14,
   maxHostile: 10,
-  attemptsPerCycle: 12,
+  attemptsPerCycle: 14,
   cycleSeconds: 3,
   despawnRadius: 88,
+  darkSpawns: true,
+  undergroundFloor: 5,
 });
+
+/** Share of night cycles that look underground rather than at the surface. */
+const NIGHT_SHELTERED_SHARE = 0.3;
+
+/** Share of daylight cycles that look for sheltered hostiles. */
+const DAY_SHELTERED_SHARE = 0.5;
 
 export interface SpawnContext {
   readonly world: World;
   readonly playerX: number;
+  readonly playerY: number;
   readonly playerZ: number;
   readonly isNight: boolean;
+  /** False in modes where nothing hunts the player. */
+  readonly hostilesAllowed: boolean;
   readonly passiveCount: number;
   readonly hostileCount: number;
   readonly random: () => number;
+}
+
+/** A candidate standing position, and whether it can see the sky. */
+interface Candidate {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly skyExposed: boolean;
 }
 
 /**
  * Decides where and what to spawn.
  *
  * Kept separate from the entity store so the rules — population caps, the
- * exclusion ring around the player, valid ground — can be tested directly
- * against a hand-built world.
+ * exclusion ring around the player, valid ground, and which creatures a given
+ * light condition permits — can be tested directly against a hand-built world.
  */
 export class MobSpawner {
   private readonly settings: SpawnSettings;
@@ -84,78 +112,146 @@ export class MobSpawner {
    */
   plan(context: SpawnContext): SpawnRequest[] {
     const settings = this.settings;
-    const hostile = context.isNight && context.hostileCount < settings.maxHostile;
-    const passive = !context.isNight && context.passiveCount < settings.maxPassive;
+    const wantHostile =
+      context.hostilesAllowed && context.hostileCount < settings.maxHostile;
+    const wantPassive = !context.isNight && context.passiveCount < settings.maxPassive;
 
-    // Passives only appear in daylight and hostiles only at night, so the two
-    // populations never compete for the same spawn cycle.
-    const pool = hostile ? HOSTILE_TYPES : passive ? PASSIVE_TYPES : null;
-    if (pool === null || pool.length === 0) return [];
-
-    const remaining = hostile
-      ? settings.maxHostile - context.hostileCount
-      : settings.maxPassive - context.passiveCount;
+    // The search area is committed to before any attempt, not interleaved with
+    // them. Alternating inside the loop lets whichever area succeeds first win
+    // every cycle — which in daylight is always the open surface, so a player
+    // in a mine would never see anything spawn.
+    const sheltered = this.chooseShelteredCycle(context, wantHostile, wantPassive);
+    if (sheltered === null) return [];
 
     for (let attempt = 0; attempt < settings.attemptsPerCycle; attempt++) {
-      const point = this.samplePosition(context);
+      const point = sheltered
+        ? this.sampleSheltered(context)
+        : this.sampleSurface(context);
       if (point === null) continue;
 
-      const definition = chooseWeighted(pool, context.random());
-      if (!this.isValidGround(context.world, point.x, point.y, point.z, definition)) continue;
+      // Hostiles need darkness: night sky, or a roof over their heads.
+      const hostile = wantHostile && (context.isNight || !point.skyExposed);
+      const pool = hostile ? HOSTILE_TYPES : wantPassive && point.skyExposed ? PASSIVE_TYPES : null;
+      if (pool === null || pool.length === 0) continue;
 
+      const definition = chooseWeighted(pool, context.random());
+      if (!this.hasHeadroom(context.world, point.x, point.y, point.z, definition)) continue;
+
+      const remaining = hostile
+        ? settings.maxHostile - context.hostileCount
+        : settings.maxPassive - context.passiveCount;
       return this.buildGroup(context, definition, point, remaining);
     }
 
     return [];
   }
 
-  /** A random point in the ring around the player, snapped to the surface. */
-  private samplePosition(
+  /**
+   * Whether this cycle hunts for sheltered ground, open ground, or neither.
+   *
+   * Night is mostly spent on the surface, because that is where the player is
+   * and where the classic experience lives; daylight splits its attempts evenly
+   * so mines stay populated without starving the meadows.
+   */
+  private chooseShelteredCycle(
     context: SpawnContext,
-  ): { x: number; y: number; z: number } | null {
+    wantHostile: boolean,
+    wantPassive: boolean,
+  ): boolean | null {
+    const canShelter = wantHostile && this.settings.darkSpawns;
+
+    if (context.isNight) {
+      if (!wantHostile) return null;
+      return canShelter && context.random() < NIGHT_SHELTERED_SHARE;
+    }
+
+    if (canShelter && wantPassive) return context.random() < DAY_SHELTERED_SHARE;
+    if (canShelter) return true;
+    return wantPassive ? false : null;
+  }
+
+  /** A random point in the ring around the player, snapped to the surface. */
+  private sampleSurface(context: SpawnContext): Candidate | null {
+    const point = this.sampleColumn(context);
+    if (point === null) return null;
+
+    // Unloaded terrain has no surface to stand on.
+    const surface = context.world.surfaceHeightAt(point.x, point.z);
+    if (surface === null) return null;
+    if (surface <= 0 || surface > WORLD_MAX_Y - 4) return null;
+    if (!this.isValidGround(context.world, point.x, surface, point.z)) return null;
+
+    return { x: point.x, y: surface, z: point.z, skyExposed: true };
+  }
+
+  /**
+   * A standable pocket beneath the surface: a cave, a mine, or anywhere the
+   * player has built a roof. Scanned downward from just under the terrain so
+   * the first hit is the shallowest — the pocket nearest the player.
+   */
+  private sampleSheltered(context: SpawnContext): Candidate | null {
+    const point = this.sampleColumn(context);
+    if (point === null) return null;
+
+    const surface = context.world.surfaceHeightAt(point.x, point.z);
+    if (surface === null) return null;
+
+    const top = Math.min(surface - 2, Math.floor(context.playerY) + 12);
+    const floor = this.settings.undergroundFloor;
+    if (top <= floor) return null;
+
+    for (let y = top; y >= floor; y--) {
+      if (!this.isValidGround(context.world, point.x, y, point.z)) continue;
+      if (isSkyExposed(context.world, point.x, y, point.z)) continue;
+      return { x: point.x, y, z: point.z, skyExposed: false };
+    }
+    return null;
+  }
+
+  /** Picks a block column in the exclusion ring around the player. */
+  private sampleColumn(context: SpawnContext): { x: number; z: number } | null {
     const { minRadius, maxRadius } = this.settings;
     const angle = context.random() * Math.PI * 2;
     const radius = minRadius + context.random() * (maxRadius - minRadius);
 
     const x = Math.floor(context.playerX + Math.cos(angle) * radius) + 0.5;
     const z = Math.floor(context.playerZ + Math.sin(angle) * radius) + 0.5;
-
-    // Unloaded terrain has no surface to stand on.
-    const surface = context.world.surfaceHeightAt(x, z);
-    if (surface === null) return null;
-    if (surface <= 0 || surface > WORLD_MAX_Y - 4) return null;
-
-    return { x, y: surface, z };
+    return context.world.isLoadedAt(x, z) ? { x, z } : null;
   }
 
   /**
-   * Ground must be solid, dry, and have clear headroom for the creature.
-   * Spawning into a wall or a lake produces a creature that immediately
-   * suffocates or drifts away.
+   * Ground must be solid and dry. Spawning into a lake produces a creature
+   * that immediately drifts away.
    */
-  private isValidGround(
+  private isValidGround(world: World, x: number, y: number, z: number): boolean {
+    const below = world.getBlock(x, y - 1, z);
+    if (!BlockRegistry.isSolid(below)) return false;
+    if (below === BlockId.Leaves) return false;
+    return world.getBlock(x, y, z) === BlockId.Air;
+  }
+
+  /**
+   * Clear headroom for the creature's full height. Spawning into a ceiling
+   * produces one that suffocates or is shoved through the floor.
+   */
+  private hasHeadroom(
     world: World,
     x: number,
     y: number,
     z: number,
     definition: EntityDefinition,
   ): boolean {
-    const below = world.getBlock(x, y - 1, z);
-    if (!BlockRegistry.isSolid(below)) return false;
-    if (below === BlockId.Leaves) return false;
-
     const headroom = Math.ceil(definition.height);
     for (let offset = 0; offset < headroom; offset++) {
       if (world.getBlock(x, y + offset, z) !== BlockId.Air) return false;
     }
-
     return true;
   }
 
   private buildGroup(
     context: SpawnContext,
     definition: EntityDefinition,
-    origin: { x: number; y: number; z: number },
+    origin: Candidate,
     remaining: number,
   ): SpawnRequest[] {
     const span = definition.groupMax - definition.groupMin;
@@ -172,14 +268,17 @@ export class MobSpawner {
       const x = origin.x + offsetX;
       const z = origin.z + offsetZ;
 
-      const surface = context.world.surfaceHeightAt(x, z);
-      if (surface === null) continue;
-      if (!this.isValidGround(context.world, x, surface, z, definition)) continue;
+      // A sheltered group keeps its own level; a surface group re-snaps to the
+      // terrain so members do not hang off the side of a slope.
+      const y = origin.skyExposed ? context.world.surfaceHeightAt(x, z) : origin.y;
+      if (y === null) continue;
+      if (!this.isValidGround(context.world, x, y, z)) continue;
+      if (!this.hasHeadroom(context.world, x, y, z, definition)) continue;
 
       requests.push({
         type: definition.id,
         x,
-        y: surface,
+        y,
         z,
         yaw: context.random() * Math.PI * 2,
       });
@@ -187,6 +286,20 @@ export class MobSpawner {
 
     return requests;
   }
+}
+
+/**
+ * True when nothing opaque stands between this cell and the sky.
+ *
+ * This is the engine's stand-in for a light level: there is no propagated
+ * lighting model, so "can see the sky" is what separates a lit meadow from a
+ * cave or a roofed-in base.
+ */
+export function isSkyExposed(world: World, x: number, y: number, z: number): boolean {
+  for (let above = Math.floor(y) + 1; above < CHUNK_HEIGHT; above++) {
+    if (BlockRegistry.isOpaque(world.getBlock(x, above, z))) return false;
+  }
+  return true;
 }
 
 function chooseWeighted(

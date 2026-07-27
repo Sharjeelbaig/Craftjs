@@ -10,10 +10,17 @@ const outputRoot = resolve('public/assets/inventory-icons');
 const itemAtlas = await decodePng(await readFile(resolve(sourceRoot, 'items.png')));
 const terrainAtlas = await decodePng(await readFile(resolve(sourceRoot, 'terrain.png')));
 
-/** @type {Map<string, { atlas: 'items' | 'terrain', x: number, y: number }>} */
+/**
+ * @type {Map<string, {
+ *   atlas: 'items' | 'terrain',
+ *   x: number,
+ *   y: number,
+ *   tint?: [number, number, number],
+ * }>}
+ */
 const icons = new Map();
-const item = (id, x, y) => icons.set(id, { atlas: 'items', x, y });
-const terrain = (id, x, y) => icons.set(id, { atlas: 'terrain', x, y });
+const item = (id, x, y, tint) => icons.set(id, { atlas: 'items', x, y, tint });
+const terrain = (id, x, y, tint) => icons.set(id, { atlas: 'terrain', x, y, tint });
 
 // Craftjs block catalogue. PSP renders these from its terrain atlas.
 terrain('block:1', 1, 0);
@@ -27,6 +34,12 @@ terrain('block:9', 0, 1);
 terrain('block:10', 1, 3);
 terrain('block:12', 2, 4);
 terrain('block:13', 7, 0);
+terrain('block:15', 2, 2); // Coal ore
+terrain('block:16', 1, 2); // Iron ore
+terrain('block:17', 0, 2); // Gold ore
+terrain('block:18', 2, 3); // Diamond ore
+terrain('block:19', 0, 8); // Rail
+item('block:20', 13, 2); // Bed — the inventory sprite, not the placed block face
 
 // Creature loot and general resources.
 item('item:raw-porkchop', 7, 5);
@@ -143,6 +156,7 @@ item('item:diamond', 7, 3);
 item('item:iron-ingot', 7, 1);
 item('item:coal', 7, 0);
 item('item:stick', 5, 3);
+item('item:minecart', 7, 8);
 
 // Spawn eggs: same creature palettes as the supplied inventory atlas.
 item('egg:0', 3, 14); // Pig
@@ -154,11 +168,14 @@ item('egg:5', 6, 14); // Spider
 item('egg:7', 8, 14); // Skeleton
 item('egg:8', 5, 14); // Creeper
 item('egg:9', 7, 14); // Cave Spider
+// The supplied atlas predates horses, so its egg is the pig cell recoloured to
+// a chestnut coat rather than a duplicate of an existing creature's egg.
+item('egg:10', 3, 14, [0.62, 0.46, 0.3]); // Horse
 
 await mkdir(outputRoot, { recursive: true });
 for (const [id, source] of icons) {
   const atlas = source.atlas === 'items' ? itemAtlas : terrainAtlas;
-  const pixels = extractTile(atlas, source.x, source.y);
+  const pixels = extractTile(atlas, source.x, source.y, source.tint);
   if (pixels.length === 0) {
     throw new Error(`${id} maps to an empty ${source.atlas} cell ${source.x},${source.y}`);
   }
@@ -172,7 +189,7 @@ function fileName(id) {
   return id.replace(':', '_');
 }
 
-function extractTile(atlas, tileX, tileY) {
+function extractTile(atlas, tileX, tileY, tint) {
   const pixels = [];
   for (let y = 0; y < 16; y += 2) {
     for (let x = 0; x < 16; x += 2) {
@@ -198,18 +215,29 @@ function extractTile(atlas, tileX, tileY) {
       green /= alpha;
       blue /= alpha;
       const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+      // A tint recolours the cell by its own brightness, so the sprite's
+      // shading survives instead of flattening into one block of colour.
+      if (tint !== undefined) {
+        red = luminance * tint[0] * 1.6;
+        green = luminance * tint[1] * 1.6;
+        blue = luminance * tint[2] * 1.6;
+      }
       const greyMix = 0.28;
       pixels.push({
         x,
         y,
-        red: Math.round(red * (1 - greyMix) + luminance * greyMix),
-        green: Math.round(green * (1 - greyMix) + luminance * greyMix),
-        blue: Math.round(blue * (1 - greyMix) + luminance * greyMix),
+        red: clampChannel(red * (1 - greyMix) + luminance * greyMix),
+        green: clampChannel(green * (1 - greyMix) + luminance * greyMix),
+        blue: clampChannel(blue * (1 - greyMix) + luminance * greyMix),
         alpha: averagedAlpha,
       });
     }
   }
   return pixels;
+}
+
+function clampChannel(value) {
+  return Math.max(0, Math.min(255, Math.round(value)));
 }
 
 function vectorise(id, source, pixels) {

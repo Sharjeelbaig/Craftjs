@@ -39,6 +39,23 @@ export interface ItemDropView {
   readonly age: number;
 }
 
+/**
+ * The item drawn in the player's hand.
+ *
+ * Deliberately flat and adapter-agnostic: the renderer decides whether that
+ * means a textured cube, a box model or nothing at all.
+ */
+export interface HeldItemView {
+  readonly item: ItemId;
+  readonly name: string;
+  /** Set when the item places a block, so the cube can be textured from it. */
+  readonly block: number | null;
+  /** Tool class, when the item is a tool. Picks the box model. */
+  readonly tool: string | null;
+  /** Base colour for items with no texture of their own. */
+  readonly colour: number;
+}
+
 /** Atmospheric state derived from the world clock. */
 export interface SkyState {
   /** Ambient multiplier applied to baked vertex lighting, in [0, 1]. */
@@ -77,6 +94,15 @@ export interface GameRenderer {
 
   /** Optional for renderers that can display collectible item stacks. */
   syncItemDrops?(views: readonly ItemDropView[]): void;
+
+  /**
+   * Sets what the player is holding, or clears the hand when null. Optional so
+   * headless renderers need not model a first-person view.
+   */
+  setHeldItem?(item: HeldItemView | null): void;
+
+  /** Plays one swing of the held item. Optional, like `setHeldItem`. */
+  swingHeldItem?(): void;
 
   /** Highlights the block being targeted, or clears it when null. */
   setBlockHighlight(block: Vec3Like | null): void;

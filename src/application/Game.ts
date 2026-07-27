@@ -9,10 +9,16 @@ import { CHUNK_SIZE, SEA_LEVEL } from '@domain/world/WorldConstants';
 import {
   MovementMode,
   PLAYER_EYE_HEIGHT,
+  PLAYER_REACH,
   PLAYER_SIZE,
   Player,
   type PlayerSnapshot,
 } from '@domain/player/Player';
+import {
+  WAKE_FRACTION,
+  canSleep,
+  sleepRejectionMessage,
+} from '@domain/world/Sleep';
 import { GameMode, parseGameMode } from '@domain/player/GameMode';
 import {
   defaultWorldCreationSettings,
@@ -21,8 +27,10 @@ import {
 import { starterChestLoot, starterChestPosition } from '@domain/world/StarterChest';
 import { Inventory } from '@domain/inventory/Inventory';
 import { RECIPES, canCraft, craft } from '@domain/inventory/Crafting';
+import { blockDrop } from '@domain/inventory/BlockDrops';
+import { canHarvest, toolProfile } from '@domain/inventory/Tool';
 import {
-  blockItem,
+  catalogItem,
   itemDefinition,
   type ItemDefinition,
   type ItemId,
@@ -45,6 +53,7 @@ import { InputAction, type InputSource } from './ports/InputSource';
 import type { WorldRepository } from './ports/WorldRepository';
 import type { BlockEditMessage, MultiplayerSession } from './ports/MultiplayerSession';
 import { EntityTypeId } from '@domain/entity/EntityType';
+import { canPlaceCart } from '@domain/entity/Vehicle';
 import type { EntityView } from './ports/GameRenderer';
 
 /** Save format version, bumped when stored records change shape. */
@@ -54,6 +63,10 @@ const AUTOSAVE_INTERVAL_SECONDS = 20;
 
 /** Chunks force-loaded before the first frame so spawn is never mid-air. */
 const SPAWN_PRELOAD_RADIUS = 1;
+
+/** Items with behaviour of their own rather than a block to place. */
+const MINECART_ITEM = catalogItem('minecart');
+const SADDLE_ITEM = catalogItem('saddle');
 
 /**
  * Consecutive frame failures tolerated before the loop gives up.
@@ -700,18 +713,32 @@ export class Game {
       // Frozen on death: no movement, no mining, no creature interaction.
       this.mining.reset();
       this.renderer.setBreakProgress(0);
+      if (this.entities.ridden !== null) this.entities.dismount();
       return;
     }
 
-    const outcome = this.movement.step(this.player, this.world, this.input.getIntent(), step);
-    if (outcome.landedFallDistance > 0) {
-      if (this.combat.applyFallDamage(this.player, outcome.landedFallDistance)) {
-        this.handleDeath('fell from a high place');
+    const intent = this.input.getIntent();
+    const mount = this.entities.ridden;
+
+    // A rider's own locomotion is suspended: the vehicle moves, and the player
+    // is carried. Running both would have the two fight over the same position.
+    if (mount === null) {
+      const outcome = this.movement.step(this.player, this.world, intent, step);
+      if (outcome.landedFallDistance > 0) {
+        if (this.combat.applyFallDamage(this.player, outcome.landedFallDistance)) {
+          this.handleDeath('fell from a high place');
+        }
+        this.emitStatus();
       }
-      this.emitStatus();
     }
 
-    const creatures = this.entities.update(this.player, this.time, step);
+    const creatures = this.entities.update(
+      this.player,
+      this.time,
+      step,
+      mount === null ? null : { intent, yaw: this.player.yaw },
+    );
+    if (mount !== null) this.followMount();
     if (creatures.playerHits.length > 0) {
       if (this.combat.applyHits(this.player, creatures.playerHits)) {
         this.handleDeath(`slain by a ${creatures.playerHits[0].attacker}`);
@@ -742,6 +769,128 @@ export class Game {
   }
 
   /**
+   * Sets a minecart down on the rail the player is aiming at.
+   *
+   * Carts only exist on track, so this refuses anywhere else rather than
+   * dropping one on the ground where it could never be driven.
+   */
+  private tryPlaceMinecart(): void {
+    const hit = this.editor.findTarget(this.player);
+    if (hit === null) return;
+
+    // Aim at the rail itself or at the block carrying it; both are natural.
+    const candidates: readonly (readonly [number, number, number])[] = [
+      [hit.x, hit.y, hit.z],
+      [hit.x + hit.normalX, hit.y + hit.normalY, hit.z + hit.normalZ],
+    ];
+
+    for (const [x, y, z] of candidates) {
+      if (!canPlaceCart(this.world, x, y, z)) continue;
+
+      const cart = this.entities.spawn(
+        EntityTypeId.Minecart,
+        Math.floor(x) + 0.5,
+        y,
+        Math.floor(z) + 0.5,
+        this.player.yaw,
+      );
+      if (cart === null) {
+        this.notify('Too many entities to place a minecart');
+        return;
+      }
+      if (this.player.gameMode !== GameMode.Creative) {
+        this.player.inventory.remove(MINECART_ITEM);
+        this.emitInventory();
+      }
+      this.notify('Minecart placed — right click to ride');
+      return;
+    }
+
+    this.notify('A minecart needs a rail to sit on');
+  }
+
+  /**
+   * Places the rider in their mount's seat for this tick.
+   *
+   * `previousX/Y/Z` are advanced rather than reset, so the renderer keeps
+   * interpolating and the ride is as smooth as walking. Fall distance is
+   * cleared because the vehicle absorbs the landing, not the passenger.
+   */
+  private followMount(): void {
+    const mount = this.entities.ridden;
+    if (mount === null) return;
+
+    this.player.beginTick();
+    this.player.x = mount.x;
+    this.player.y = mount.y + mount.definition.seatHeight;
+    this.player.z = mount.z;
+    this.player.velocityX = 0;
+    this.player.velocityY = 0;
+    this.player.velocityZ = 0;
+    this.player.onGround = mount.onGround;
+    this.player.fallDistance = 0;
+  }
+
+  /**
+   * Seats the player on whatever they are aiming at, if it can be ridden.
+   *
+   * Returns true when the interaction was handled, so a click on a horse never
+   * also places a block into the world behind it.
+   */
+  private tryMount(): boolean {
+    const target = this.combat.findTarget(this.player);
+    if (target === null || !target.definition.rideable) return false;
+
+    const definition = target.definition;
+    if (definition.needsSaddle && this.player.gameMode !== GameMode.Creative) {
+      if (!this.player.inventory.has(SADDLE_ITEM)) {
+        this.notify(`A ${definition.name.toLowerCase()} needs a saddle to ride`);
+        return true;
+      }
+    }
+
+    if (!this.entities.mount(target)) return false;
+    this.followMount();
+    this.notify(`Riding ${definition.name.toLowerCase()} — Shift to dismount`);
+    return true;
+  }
+
+  /**
+   * Stands the player up beside their mount.
+   *
+   * Offsetting sideways matters: leaving them in the seat position means the
+   * next tick resolves the collision by shoving them somewhere arbitrary, often
+   * into the floor.
+   */
+  private dismount(): void {
+    const mount = this.entities.dismount();
+    if (mount === null) return;
+
+    const offset = mount.definition.width / 2 + PLAYER_SIZE.width / 2 + 0.1;
+    const candidates: readonly (readonly [number, number])[] = [
+      [offset, 0],
+      [-offset, 0],
+      [0, offset],
+      [0, -offset],
+      [0, 0],
+    ];
+
+    for (const [dx, dz] of candidates) {
+      const x = mount.x + dx;
+      const z = mount.z + dz;
+      const probe = { x, y: mount.y, z };
+      if (isPositionObstructed(this.world, probe, PLAYER_SIZE)) continue;
+      this.player.moveTo(x, mount.y, z);
+      this.notify(`Left the ${mount.definition.name.toLowerCase()}`);
+      return;
+    }
+
+    // Every side is walled in; stepping up out of the seat is the last resort.
+    this.player.moveTo(mount.x, mount.y + mount.definition.height, mount.z);
+    this.notify(`Left the ${mount.definition.name.toLowerCase()}`);
+  }
+
+  /**
    * Resolves what the crosshair is on.
    *
    * Creatures take priority over blocks: a swing aimed at a creature standing
@@ -757,13 +906,11 @@ export class Game {
     const held = this.input.getButtons().primary;
     // A swing at a creature is not a mining action.
     const mineable = this.targetEntityName === null ? this.target : null;
+    const tool = this.selectedItem?.id ?? null;
 
-    const broken = this.mining.update(this.player, mineable, held, step);
+    const broken = this.mining.update(this.player, mineable, held, step, tool);
     if (broken !== null) {
-      if (this.player.gameMode !== GameMode.Creative) {
-        this.player.inventory.add(blockItem(broken));
-        this.emitInventory();
-      }
+      if (this.player.gameMode !== GameMode.Creative) this.collectBrokenBlock(broken, tool);
       if (mineable !== null) {
         this.multiplayer?.publishBlockEdit({
           x: mineable.x,
@@ -815,6 +962,11 @@ export class Game {
       case InputAction.Respawn:
         this.respawn();
         break;
+
+      case InputAction.Dismount:
+        // On foot this key is sneak, which the movement intent already reads.
+        if (this.entities.ridden !== null) this.dismount();
+        break;
     }
   }
 
@@ -827,7 +979,10 @@ export class Game {
   private handleAttack(): void {
     if (this.player.isDead) return;
 
-    const outcome = this.combat.attack(this.player);
+    const tool = this.selectedItem?.id ?? null;
+    this.renderer.swingHeldItem?.();
+
+    const outcome = this.combat.attack(this.player, tool);
     if (outcome.hit) {
       if (outcome.killed && outcome.targetName !== null) this.notify(`Killed ${outcome.targetName}`);
       return;
@@ -837,8 +992,7 @@ export class Game {
       const hit = this.editor.findTarget(this.player);
       const result = this.editor.breakBlock(this.player);
       if (result.ok && hit !== null && this.player.gameMode !== GameMode.Creative) {
-        this.player.inventory.add(blockItem(hit.block as BlockId));
-        this.emitInventory();
+        this.collectBrokenBlock(hit.block as BlockId, tool);
       }
       if (result.ok) {
         this.multiplayer?.publishBlockEdit({
@@ -852,12 +1006,46 @@ export class Game {
     }
   }
 
+  /**
+   * Banks the reward for a block the player just broke.
+   *
+   * Breaking always succeeds; the drop is what the tool gates. Telling the
+   * player why they got nothing is the difference between a learnable rule and
+   * a bug report — stone mined by hand is the first wall every survival player
+   * hits.
+   */
+  private collectBrokenBlock(block: BlockId, tool: ItemId | null): void {
+    if (!canHarvest(tool, block)) {
+      const needed = BlockRegistry.get(block).harvestLevel;
+      this.notify(
+        needed >= 3
+          ? `${BlockRegistry.get(block).name} needs an iron or diamond pickaxe`
+          : `${BlockRegistry.get(block).name} needs a pickaxe`,
+      );
+      return;
+    }
+
+    const drop = blockDrop(block);
+    if (drop === null) return;
+    this.player.inventory.add(drop);
+    this.emitInventory();
+  }
+
   private useSelectedItem(): void {
+    // Interacting with something takes precedence over building: a click aimed
+    // at a horse, a bed or the starter chest is never a request to place a block.
+    if (this.tryMount()) return;
     if (this.tryOpenStarterChest()) return;
+    if (this.trySleep()) return;
 
     const item = this.selectedItem;
     if (item === null) {
       this.notify('Select an item from the inventory (E)');
+      return;
+    }
+
+    if (item.id === MINECART_ITEM) {
+      this.tryPlaceMinecart();
       return;
     }
 
@@ -899,6 +1087,50 @@ export class Game {
       if (spawned === null) this.notify('Mob limit reached');
       else this.notify(`Spawned ${spawned.definition.name}`);
     }
+  }
+
+  /**
+   * Uses a targeted bed to sleep through to morning.
+   *
+   * Returns true when the bed handled the interaction — including a refusal, so
+   * the click is not also treated as a block placement onto the bed.
+   */
+  private trySleep(): boolean {
+    const hit = this.editor.findTarget(this.player);
+    if (hit === null || hit.block !== BlockId.Bed) return false;
+
+    const eye = this.player.eyePosition;
+    const outcome = canSleep({
+      isNight: this.time.isNight,
+      isStorming: this.weather.kind === 'storm',
+      distance: Math.hypot(hit.x + 0.5 - eye.x, hit.y + 0.5 - eye.y, hit.z + 0.5 - eye.z),
+      reach: PLAYER_REACH,
+      nearestHostileDistance: this.entities.nearestHostileDistance(
+        this.player.x,
+        this.player.y,
+        this.player.z,
+      ),
+    });
+
+    if (!outcome.ok) {
+      this.notify(sleepRejectionMessage(outcome.reason));
+      return true;
+    }
+
+    this.time.fraction = WAKE_FRACTION;
+    this.weather.clear();
+    // A bed is a checkpoint: dying after sleeping must return the player here,
+    // not to wherever they first spawned hours ago.
+    this.player.setSpawnPoint(this.player.x, this.player.y, this.player.z);
+    // The loop has been idle for as long as the fade took; without this the
+    // next frame would try to catch up on the skipped wall-clock time.
+    this.loop.resetTiming();
+
+    this.emitWorldStatus();
+    this.applySky();
+    this.notify('Good morning — spawn point set');
+    void this.save();
+    return true;
   }
 
   private tryOpenStarterChest(): boolean {
@@ -1061,7 +1293,30 @@ export class Game {
   }
 
   private emitInventory(): void {
+    this.syncHeldItem();
     for (const listener of this.inventoryListeners) listener();
+  }
+
+  /**
+   * Mirrors the equipped item into the renderer's hand.
+   *
+   * Driven from the same place the HUD is, so what the player sees held and
+   * what the hotbar highlights can never disagree.
+   */
+  private syncHeldItem(): void {
+    const item = this.selectedItem;
+    if (item === null) {
+      this.renderer.setHeldItem?.(null);
+      return;
+    }
+
+    this.renderer.setHeldItem?.({
+      item: item.id,
+      name: item.name,
+      block: item.block ?? null,
+      tool: toolProfile(item.id)?.toolClass ?? null,
+      colour: item.colour ?? 0xc8c8c8,
+    });
   }
 
   private emitWorldStatus(): void {

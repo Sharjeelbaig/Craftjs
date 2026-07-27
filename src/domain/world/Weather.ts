@@ -57,6 +57,14 @@ export class Weather {
     return 1;
   }
 
+  /** Ends the current spell. Sleeping through a storm is what clears it. */
+  clear(): boolean {
+    if (this.kind === WeatherKind.Clear) return false;
+    this.kind = WeatherKind.Clear;
+    this.secondsRemaining = this.nextDuration();
+    return true;
+  }
+
   snapshot(): WeatherSnapshot {
     return { kind: this.kind, secondsRemaining: this.secondsRemaining };
   }

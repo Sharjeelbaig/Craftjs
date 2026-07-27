@@ -3,6 +3,7 @@ import type {
   CameraPose,
   EntityView,
   GameRenderer,
+  HeldItemView,
   ItemDropView,
   RenderStats,
   SkyState,
@@ -14,6 +15,7 @@ import { CHUNK_SIZE } from '@domain/world/WorldConstants';
 import { createBlockTextureArray } from './TextureAtlas';
 import { createVoxelMaterials, type VoxelMaterials } from './VoxelMaterial';
 import { EntityLayer } from './EntityLayer';
+import { HeldItemLayer } from './HeldItemLayer';
 import { ItemDropLayer } from './ItemDropLayer';
 import { WorldRain } from './WorldRain';
 
@@ -52,6 +54,7 @@ export class ThreeRenderer implements GameRenderer {
   private readonly highlight: THREE.LineSegments;
   private readonly entityLayer: EntityLayer;
   private readonly itemDropLayer: ItemDropLayer;
+  private readonly heldItemLayer: HeldItemLayer;
   private readonly rain: WorldRain;
   private readonly chunks = new Map<string, ChunkMeshes>();
 
@@ -66,6 +69,8 @@ export class ThreeRenderer implements GameRenderer {
   private fogMultiplier = 1;
 
   private renderDistance = 8;
+  /** Timestamp of the previous frame, for animating the held item. */
+  private lastFrameTime = 0;
   private submerged = false;
   private contextLost = false;
   private disposed = false;
@@ -108,6 +113,7 @@ export class ThreeRenderer implements GameRenderer {
 
     this.entityLayer = new EntityLayer(this.scene, this.skyColor, this.fogNear, this.fogFar);
     this.itemDropLayer = new ItemDropLayer(this.scene);
+    this.heldItemLayer = new HeldItemLayer(this.atlas);
     this.rain = new WorldRain(this.scene);
 
     this.applyViewDistance();
@@ -187,6 +193,7 @@ export class ThreeRenderer implements GameRenderer {
 
     this.materials.setDaylight(light);
     this.entityLayer.setDaylight(light);
+    this.heldItemLayer.setDaylight(light);
 
     if (height >= 0.2) {
       this.skyColor.copy(DAY_SKY);
@@ -243,6 +250,16 @@ export class ThreeRenderer implements GameRenderer {
     this.chunks.delete(coord.key);
   }
 
+  setHeldItem(item: HeldItemView | null): void {
+    if (this.disposed) return;
+    this.heldItemLayer.setItem(item);
+  }
+
+  swingHeldItem(): void {
+    if (this.disposed) return;
+    this.heldItemLayer.swing();
+  }
+
   setBlockHighlight(block: Vec3Like | null): void {
     if (block === null) {
       this.highlight.visible = false;
@@ -289,11 +306,20 @@ export class ThreeRenderer implements GameRenderer {
   render(camera: CameraPose): void {
     if (this.disposed || this.contextLost) return;
 
+    const now = performance.now();
+    // Clamped so a stalled or backgrounded tab cannot jump the swing animation
+    // straight to its end on the first frame back.
+    const dt = this.lastFrameTime === 0 ? 0 : Math.min(0.1, (now - this.lastFrameTime) / 1000);
+    this.lastFrameTime = now;
+
     this.camera.position.set(camera.position.x, camera.position.y, camera.position.z);
     this.camera.rotation.set(camera.pitch, camera.yaw, 0);
-    this.rain.update(camera.position, performance.now() / 1000);
+    this.rain.update(camera.position, now / 1000);
 
     this.renderer.render(this.scene, this.camera);
+    // The hand is drawn last, over a cleared depth buffer, so it is never
+    // clipped by terrain the player is standing against.
+    this.heldItemLayer.render(this.renderer, dt);
   }
 
   getStats(): RenderStats {
@@ -323,6 +349,7 @@ export class ThreeRenderer implements GameRenderer {
 
     this.entityLayer.dispose();
     this.itemDropLayer.dispose();
+    this.heldItemLayer.dispose();
     this.rain.dispose();
     this.highlight.geometry.dispose();
     (this.highlight.material as THREE.Material).dispose();
@@ -409,6 +436,7 @@ export class ThreeRenderer implements GameRenderer {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.heldItemLayer.setAspect(width / height);
   }
 
   private readonly handleContextLost = (event: Event): void => {

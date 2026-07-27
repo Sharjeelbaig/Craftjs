@@ -71,8 +71,8 @@ describe('Inventory', () => {
   });
 
   it('registers the complete creative item catalogue without duplicate ids', () => {
-    expect(CREATIVE_CATALOG_ITEMS).toHaveLength(126);
-    expect(CREATIVE_EGG_ITEMS).toHaveLength(9);
+    expect(CREATIVE_CATALOG_ITEMS).toHaveLength(127);
+    expect(CREATIVE_EGG_ITEMS).toHaveLength(10);
     expect(new Set(CREATIVE_CATALOG_ITEMS).size).toBe(CREATIVE_CATALOG_ITEMS.length);
     expect(CREATIVE_CATALOG_ITEMS.every((item) => itemDefinition(item) !== null)).toBe(true);
 

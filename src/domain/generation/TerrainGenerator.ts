@@ -3,6 +3,7 @@ import type { ChunkCoord } from '../world/ChunkCoord';
 import { BlockId } from '../world/BlockType';
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_MAX_Y } from '../world/WorldConstants';
 import { fbm2, random2 } from './Noise';
+import { Underground } from './Underground';
 import type { ChunkGenerator } from './ChunkGenerator';
 
 const SEED_HEIGHT = 0x1a2b3c4d;
@@ -36,6 +37,7 @@ export class TerrainGenerator implements ChunkGenerator {
   private readonly temperatureSeed: number;
   private readonly treeSeed: number;
   private readonly treeShapeSeed: number;
+  private readonly underground: Underground;
 
   constructor(seed: number) {
     this.seed = seed | 0;
@@ -44,6 +46,7 @@ export class TerrainGenerator implements ChunkGenerator {
     this.temperatureSeed = (this.seed ^ SEED_TEMPERATURE) | 0;
     this.treeSeed = (this.seed ^ SEED_TREE) | 0;
     this.treeShapeSeed = (this.seed ^ SEED_TREE_SHAPE) | 0;
+    this.underground = new Underground(this.seed);
   }
 
   /** Surface height (topmost solid block Y) for a world column. */
@@ -113,7 +116,14 @@ export class TerrainGenerator implements ChunkGenerator {
 
     const stoneTop = height - 4;
     for (let y = BEDROCK_TOP + 1; y <= stoneTop; y++) {
-      chunk.setGenerated(localX, y, localZ, BlockId.Stone);
+      // Caves are decided before ore so a tunnel through a vein exposes the
+      // surrounding blocks rather than leaving ore floating in open air.
+      if (this.underground.isCave(worldX, y, worldZ, height)) {
+        chunk.setGenerated(localX, y, localZ, BlockId.Air);
+        continue;
+      }
+      const ore = this.underground.oreAt(worldX, y, worldZ);
+      chunk.setGenerated(localX, y, localZ, ore ?? BlockId.Stone);
     }
 
     for (let y = Math.max(BEDROCK_TOP + 1, stoneTop + 1); y < height; y++) {

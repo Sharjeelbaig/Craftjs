@@ -141,7 +141,9 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     // The deliberate worst-case 65k-vertex meshing test can cross Vitest's
-    // 5s default on shared/low-power CPUs even though the code is healthy.
-    testTimeout: 10_000,
+    // 5s default on shared/low-power CPUs even though the code is healthy. It
+    // runs alongside the generation and spawning suites, which are CPU-bound
+    // too, so the budget accounts for contention rather than the test alone.
+    testTimeout: 20_000,
   },
 });

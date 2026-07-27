@@ -59,6 +59,9 @@ const LOOT: Readonly<Partial<Record<EntityType, readonly LootRule[]>>> = Object.
     rule(ResourceItemId.String, 0, 2),
     rule(ResourceItemId.SpiderEye, 1, 1, 1 / 3),
   ]),
+  [EntityTypeId.Horse]: Object.freeze([
+    rule(ResourceItemId.Leather, 0, 2),
+  ]),
 });
 
 /** Rolls one death once. The injected source makes rewards exactly testable. */

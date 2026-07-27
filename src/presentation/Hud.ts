@@ -479,7 +479,10 @@ export class Hud {
           <div><dt>Sneak / Descend</dt><dd>Shift</dd></div>
           <div><dt>Sprint</dt><dd>Ctrl</dd></div>
           <div><dt>Mine / Attack</dt><dd>Hold left click</dd></div>
-          <div><dt>Place block</dt><dd>Right click</dd></div>
+          <div><dt>Place / Use</dt><dd>Right click</dd></div>
+          <div><dt>Ride horse or cart</dt><dd>Right click <span class="muted">(saddle for a horse)</span></dd></div>
+          <div><dt>Dismount</dt><dd>Shift</dd></div>
+          <div><dt>Sleep</dt><dd>Right click a bed <span class="muted">(night or storm)</span></dd></div>
           <div><dt>Select block</dt><dd>1 – 9 / Scroll</dd></div>
           <div><dt>Inventory / Crafting</dt><dd>E</dd></div>
           <div><dt>Survival / Creative</dt><dd>G</dd></div>
