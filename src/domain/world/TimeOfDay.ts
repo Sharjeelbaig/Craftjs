@@ -48,6 +48,17 @@ export class TimeOfDay {
     return Math.sin(this.fraction * Math.PI * 2);
   }
 
+  /**
+   * Horizontal leg of the sun's position in [-1, 1].
+   *
+   * The companion to `sunHeight`: together they are a point on the sun's
+   * circle. Height is a sine and so repeats on both sides of noon, which is
+   * enough to shade the world but not to say where the sun actually is.
+   */
+  get sunHorizontal(): number {
+    return Math.cos(this.fraction * Math.PI * 2);
+  }
+
   /** Ambient light multiplier applied to all baked vertex lighting. */
   get lightLevel(): number {
     // Smooth ramp across dawn and dusk rather than a hard switch, so the

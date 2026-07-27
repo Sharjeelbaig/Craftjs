@@ -18,6 +18,7 @@ import { EntityLayer } from './EntityLayer';
 import { HeldItemLayer } from './HeldItemLayer';
 import { ItemDropLayer } from './ItemDropLayer';
 import { WorldRain } from './WorldRain';
+import { SkySystem } from './SkySystem';
 
 /** Sky palette, interpolated across the day by sun height. */
 const DAY_SKY = new THREE.Color(0x8fc4ea);
@@ -56,6 +57,7 @@ export class ThreeRenderer implements GameRenderer {
   private readonly itemDropLayer: ItemDropLayer;
   private readonly heldItemLayer: HeldItemLayer;
   private readonly rain: WorldRain;
+  private readonly sky: SkySystem;
   private readonly chunks = new Map<string, ChunkMeshes>();
 
   private readonly resizeObserver: ResizeObserver | null = null;
@@ -65,6 +67,7 @@ export class ThreeRenderer implements GameRenderer {
   private readonly skyColor = DAY_SKY.clone();
   private daylight = 1;
   private sunHeight = 1;
+  private sunHorizontal = 0;
   private weatherDarkening = 0;
   private fogMultiplier = 1;
 
@@ -115,6 +118,7 @@ export class ThreeRenderer implements GameRenderer {
     this.itemDropLayer = new ItemDropLayer(this.scene);
     this.heldItemLayer = new HeldItemLayer(this.atlas);
     this.rain = new WorldRain(this.scene);
+    this.sky = new SkySystem(this.scene);
 
     this.applyViewDistance();
 
@@ -173,11 +177,15 @@ export class ThreeRenderer implements GameRenderer {
     const fogMultiplier = Math.max(0.35, Math.min(1, sky.fogMultiplier ?? 1));
     const light = clamp01(sky.light * (1 - darkening));
     const height = Number.isFinite(sky.sunHeight) ? sky.sunHeight : 1;
+    const horizontal = Number.isFinite(sky.sunHorizontal) ? (sky.sunHorizontal as number) : 0;
 
     // Sun height changes continuously; skip the colour work unless it moved
-    // enough to be visible, which is most frames.
+    // enough to be visible, which is most frames. The horizontal leg is
+    // checked too: it moves fastest exactly when the height is flattest, and
+    // guarding on height alone would stall the sun overhead at noon.
     if (
       Math.abs(height - this.sunHeight) < 0.002 &&
+      Math.abs(horizontal - this.sunHorizontal) < 0.002 &&
       Math.abs(light - this.daylight) < 0.002 &&
       Math.abs(darkening - this.weatherDarkening) < 0.002 &&
       Math.abs(fogMultiplier - this.fogMultiplier) < 0.002
@@ -187,13 +195,19 @@ export class ThreeRenderer implements GameRenderer {
 
     this.daylight = light;
     this.sunHeight = height;
+    this.sunHorizontal = horizontal;
     this.weatherDarkening = darkening;
     this.fogMultiplier = fogMultiplier;
-    this.rain.setStrength(Math.max(0, Math.min(1, sky.precipitation ?? 0)));
+    const precipitation = Math.max(0, Math.min(1, sky.precipitation ?? 0));
+    this.rain.setStrength(precipitation);
+    this.sky.setOvercast(precipitation > 0);
 
     this.materials.setDaylight(light);
     this.entityLayer.setDaylight(light);
     this.heldItemLayer.setDaylight(light);
+    // The sky takes the undimmed daylight and the weather separately: the
+    // clouds need to know it is a bright overcast day, not a dim one.
+    this.sky.setDaylight(clamp01(sky.light), darkening);
 
     if (height >= 0.2) {
       this.skyColor.copy(DAY_SKY);
@@ -215,6 +229,9 @@ export class ThreeRenderer implements GameRenderer {
 
     this.materials.setFog(color, near, far);
     this.entityLayer.setFog(color, near, far);
+    // The dome adopts the same resolved colour as the fog, so terrain fading
+    // out at the far plane meets the sky exactly rather than against a seam.
+    this.sky.setSkyColor(color);
     (this.scene.background as THREE.Color).copy(color);
     this.renderer.setClearColor(color, 1);
   }
@@ -314,7 +331,12 @@ export class ThreeRenderer implements GameRenderer {
 
     this.camera.position.set(camera.position.x, camera.position.y, camera.position.z);
     this.camera.rotation.set(camera.pitch, camera.yaw, 0);
-    this.rain.update(camera.position, now / 1000);
+    // Both take the same absolute clock: the rain samples the cloud pattern to
+    // decide where it may fall, so a divergent time base would rain out of the
+    // gaps rather than out of the clouds.
+    const elapsed = now / 1000;
+    this.rain.update(camera.position, elapsed);
+    this.sky.update(this.camera, this.sunHeight, this.sunHorizontal, elapsed);
 
     this.renderer.render(this.scene, this.camera);
     // The hand is drawn last, over a cleared depth buffer, so it is never
@@ -351,6 +373,7 @@ export class ThreeRenderer implements GameRenderer {
     this.itemDropLayer.dispose();
     this.heldItemLayer.dispose();
     this.rain.dispose();
+    this.sky.dispose();
     this.highlight.geometry.dispose();
     (this.highlight.material as THREE.Material).dispose();
     this.scene.clear();

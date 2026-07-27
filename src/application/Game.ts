@@ -1251,6 +1251,7 @@ export class Game {
     this.renderer.setSky({
       light: this.time.lightLevel,
       sunHeight: this.time.sunHeight,
+      sunHorizontal: this.time.sunHorizontal,
       weatherDarkening: this.weather.skyDarkening,
       fogMultiplier: this.weather.fogMultiplier,
       precipitation:

@@ -62,6 +62,14 @@ export interface SkyState {
   readonly light: number;
   /** Height of the sun in [-1, 1]; drives sky colour. */
   readonly sunHeight: number;
+  /**
+   * Horizontal leg of the sun's position in [-1, 1], paired with `sunHeight`.
+   *
+   * Height alone is a sine, so it cannot say which side of the sky the sun is
+   * on — without this the sun would set on the side it rose from. Optional
+   * because only the sky's geometry needs it, not its colour.
+   */
+  readonly sunHorizontal?: number;
   /** Additional dimming caused by rain or storms, in [0, 1]. */
   readonly weatherDarkening?: number;
   /** Pulls fog closer during poor weather. */

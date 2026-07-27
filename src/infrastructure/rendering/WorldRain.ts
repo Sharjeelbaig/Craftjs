@@ -1,17 +1,45 @@
 import * as THREE from 'three';
 import type { Vec3Like } from '@domain/shared/Vec3';
+import { cloudBaseAt } from './CloudField';
 
-const DROP_COUNT = 960;
-const HORIZONTAL_RADIUS = 30;
-const VERTICAL_RANGE = 42;
+/**
+ * Only columns under cloud produce a drop, and lighter weather retires some of
+ * the rest, so well under this many are alive at once.
+ */
+const DROP_COUNT = 9000;
+
+/**
+ * Reach of the rain field.
+ *
+ * Wide enough to read as a curtain across the view rather than a shower that
+ * only exists once you are inside it. Fog dissolves whatever is left at the
+ * far edge, so this does not need to match the render distance.
+ */
+const HORIZONTAL_RADIUS = 92;
+
+/**
+ * Concentrates drops near the viewer. Uniform-over-area would be 0.5; above
+ * that thins the far field, which is where drops are least legible anyway and
+ * cost the most to have too many of.
+ */
+const RADIUS_BIAS = 0.62;
+
 const DROP_LENGTH = 2.8;
-const CELL_SIZE = 8;
+
+/** Coarser than the drop spacing: this only controls surface re-sampling. */
+const CELL_SIZE = 16;
+
+/** Sideways travel per unit fallen. Gives the column a consistent lean. */
+const WIND_SHEAR = 0.14;
+
 
 interface DropSeed {
   readonly x: number;
   readonly z: number;
   readonly phase: number;
   readonly lengthScale: number;
+  /** Stable rank in [0, 1]; drops above the intensity sit out the shower. */
+  readonly rank: number;
 }
 
 /**
@@ -35,6 +63,8 @@ export class WorldRain {
   private readonly lines: THREE.LineSegments;
   private readonly drops: readonly DropSeed[];
   private intensity = 0;
+  /** Mirrors the cloud decks' thickened state so rain lands under real cloud. */
+  private overcast = false;
   private speed = 24;
   private surfaceSampler: ((x: number, z: number) => number | null) | null = null;
   private readonly surfaces = new Float32Array(DROP_COUNT).fill(Number.NEGATIVE_INFINITY);
@@ -57,6 +87,9 @@ export class WorldRain {
 
   setStrength(strength: number): void {
     this.intensity = Math.max(0, Math.min(1, strength));
+    // Any precipitation at all means the cloud pattern is the thickened one;
+    // sampling the fair-weather pattern would put rain in the wrong columns.
+    this.overcast = this.intensity > 0;
     this.lines.visible = this.intensity > 0;
     this.material.opacity = 0.26 + this.intensity * 0.34;
     this.speed = 22 + this.intensity * 10;
@@ -76,30 +109,65 @@ export class WorldRain {
     const centreX = Math.floor(camera.x / CELL_SIZE) * CELL_SIZE;
     const centreZ = Math.floor(camera.z / CELL_SIZE) * CELL_SIZE;
     this.sampleSurfaces(centreX, centreZ);
-    const top = camera.y + VERTICAL_RANGE * 0.55;
     const travelled = elapsedSeconds * this.speed;
-    const wind = this.intensity * 0.38;
 
     for (let index = 0; index < this.drops.length; index++) {
       const drop = this.drops[index];
       const x = centreX + drop.x;
       const z = centreZ + drop.z;
-      const y = top - ((travelled + drop.phase * VERTICAL_RANGE) % VERTICAL_RANGE);
-      const length = DROP_LENGTH * drop.lengthScale;
-      const surface = this.surfaces[index];
-      const endY = Math.min(y, Math.max(y - length, surface + 0.04));
       const offset = index * 6;
 
-      this.positions[offset] = x;
-      this.positions[offset + 1] = y <= surface ? surface : y;
+      // Lighter weather retires the higher-ranked drops, so a shower and a
+      // storm differ in how much rain there is, not just how bright it is.
+      if (drop.rank > this.intensity) {
+        this.hideDrop(offset);
+        continue;
+      }
+
+      // An unloaded column has no known ground to land on. Skipping it beats
+      // guessing a floor, which streaks rain down through the world to bedrock.
+      const ground = this.surfaces[index];
+      // Rain is what the cloud above is doing, and it starts at whichever deck
+      // is lowest over this column — so a gap in the low cloud shows rain
+      // falling from further up rather than no rain at all.
+      const base = cloudBaseAt(x, z, elapsedSeconds, this.overcast);
+      if (base === null || !Number.isFinite(ground)) {
+        this.hideDrop(offset);
+        continue;
+      }
+
+      const fall = base - ground;
+      if (fall <= 1) {
+        this.hideDrop(offset);
+        continue;
+      }
+
+      // Each drop cycles the full cloud-to-ground distance, so its lifetime is
+      // the real fall rather than a window pinned to the viewer's altitude.
+      const y = base - ((travelled + drop.phase * fall) % fall);
+      const length = DROP_LENGTH * drop.lengthScale;
+      const endY = Math.max(y - length, ground);
+
+      // Lean accumulates with distance fallen: drops leaving the cloud are
+      // still overhead, and the ones about to land are well downwind.
+      const lean = (base - y) * WIND_SHEAR * this.intensity;
+      const leanEnd = (base - endY) * WIND_SHEAR * this.intensity;
+
+      this.positions[offset] = x + lean;
+      this.positions[offset + 1] = y;
       this.positions[offset + 2] = z;
-      this.positions[offset + 3] = y <= surface ? x : x + wind;
-      this.positions[offset + 4] = y <= surface ? surface : endY;
-      this.positions[offset + 5] = y <= surface ? z : z + wind * 0.18;
+      this.positions[offset + 3] = x + leanEnd;
+      this.positions[offset + 4] = endY;
+      this.positions[offset + 5] = z;
     }
 
     const attribute = this.geometry.getAttribute('position') as THREE.BufferAttribute;
     attribute.needsUpdate = true;
+  }
+
+  /** Collapses a segment to a point so it draws nothing. */
+  private hideDrop(offset: number): void {
+    for (let i = 0; i < 6; i++) this.positions[offset + i] = 0;
   }
 
   dispose(): void {
@@ -127,11 +195,17 @@ export class WorldRain {
 }
 
 function createDrop(index: number): DropSeed {
+  // Polar rather than a square patch: a square puts its corners 40% further
+  // out than its edges, which shows up as a visibly rectangular shower.
+  const angle = hash(index * 5 + 1) * Math.PI * 2;
+  const radius = HORIZONTAL_RADIUS * Math.pow(hash(index * 5 + 2), RADIUS_BIAS);
+
   return {
-    x: (hash(index * 4 + 1) * 2 - 1) * HORIZONTAL_RADIUS,
-    z: (hash(index * 4 + 2) * 2 - 1) * HORIZONTAL_RADIUS,
-    phase: hash(index * 4 + 3),
-    lengthScale: 0.55 + hash(index * 4 + 4) * 0.9,
+    x: Math.cos(angle) * radius,
+    z: Math.sin(angle) * radius,
+    phase: hash(index * 5 + 3),
+    lengthScale: 0.55 + hash(index * 5 + 4) * 0.9,
+    rank: hash(index * 5 + 5),
   };
 }
 
