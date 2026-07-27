@@ -9,16 +9,21 @@ import { GameMode } from '@domain/player/GameMode';
 import { HOTBAR_SIZE } from '@domain/inventory/Inventory';
 import {
   CREATIVE_BLOCK_ITEMS,
+  CREATIVE_CATALOG_ITEMS,
   CREATIVE_EGG_ITEMS,
   itemDefinition,
   type ItemId,
 } from '@domain/inventory/Item';
+import { createInventoryItemIcon } from './InventoryItemIcons';
 
 /** Debug overlay refresh interval — faster just makes the numbers unreadable. */
 const DEBUG_REFRESH_MS = 200;
 
 /** Each heart represents two points of health. */
 const HEALTH_PER_HEART = 2;
+
+/** PSP-sized storage page: three rows of nine slots. */
+const INVENTORY_PAGE_SIZE = 27;
 
 /**
  * Heads-up display: crosshair, hotbar, health, pause and death overlays, and
@@ -53,6 +58,7 @@ export class Hud {
   private lastHealth = Number.NaN;
   private paused = true;
   private inventoryVisible = false;
+  private inventoryPage = 0;
   private readonly unsubscribes: (() => void)[] = [];
 
   constructor(root: HTMLElement, game: Game) {
@@ -106,7 +112,7 @@ export class Hud {
     this.worldTimer = globalThis.setInterval(() => this.setWorldStatus(game.worldStatus()), 1000);
   }
 
-  /** Shows the click-to-play overlay when input capture is lost. */
+  /** Shows the Minecraft-style pause menu when input capture is lost. */
   setPaused(paused: boolean): void {
     this.paused = paused;
     // The death screen owns the view while it is up.
@@ -217,10 +223,14 @@ export class Hud {
       label.className = 'hotbar__label';
       label.textContent = 'Empty';
 
+      const icon = document.createElement('span');
+      icon.className = 'hotbar__icon';
+      icon.setAttribute('aria-hidden', 'true');
+
       const count = document.createElement('span');
       count.className = 'hotbar__count';
 
-      slot.append(key, label, count);
+      slot.append(key, icon, label, count);
       this.slots.push(slot);
       bar.append(slot);
     }
@@ -232,9 +242,11 @@ export class Hud {
     this.slots.forEach((slot, index) => {
       const item = view.hotbar[index];
       const label = slot.querySelector<HTMLElement>('.hotbar__label');
+      const icon = slot.querySelector<HTMLElement>('.hotbar__icon');
       const count = slot.querySelector<HTMLElement>('.hotbar__count');
       slot.title = item?.name ?? 'Empty';
       if (label !== null) label.textContent = item?.name ?? 'Empty';
+      icon?.replaceChildren(...(item === null ? [] : [createInventoryItemIcon(item.id)]));
       if (count !== null) {
         count.textContent =
           item === null || view.creative || item.count <= 0 ? '' : String(item.count);
@@ -323,22 +335,58 @@ export class Hud {
     this.inventoryBody.replaceChildren();
 
     const itemHeading = document.createElement('h3');
-    itemHeading.textContent = view.creative ? 'Creative catalogue' : 'Collected blocks';
+    itemHeading.textContent = view.creative ? 'Creative catalogue' : 'Collected items';
+    const inventoryItems = view.creative
+      ? [...CREATIVE_BLOCK_ITEMS, ...CREATIVE_CATALOG_ITEMS, ...CREATIVE_EGG_ITEMS].map((id) => {
+          const definition = itemDefinition(id);
+          return { id, count: definition?.maxStack ?? 64 };
+        })
+      : [...view.items];
+    const pageCount = Math.max(1, Math.ceil(inventoryItems.length / INVENTORY_PAGE_SIZE));
+    this.inventoryPage = Math.min(this.inventoryPage, pageCount - 1);
+
+    const sectionHead = document.createElement('div');
+    sectionHead.className = 'inventory-section-head';
+    const pager = document.createElement('div');
+    pager.className = 'inventory-pager';
+    const previous = this.createPagerButton('‹', 'Previous inventory page', -1);
+    const page = document.createElement('span');
+    page.textContent = `${this.inventoryPage + 1} / ${pageCount}`;
+    const next = this.createPagerButton('›', 'Next inventory page', 1);
+    previous.disabled = this.inventoryPage === 0;
+    next.disabled = this.inventoryPage === pageCount - 1;
+    pager.append(previous, page, next);
+    sectionHead.append(itemHeading, pager);
+
     const itemGrid = document.createElement('div');
     itemGrid.className = 'inventory-grid';
-
-    if (view.creative) {
-      for (const item of [...CREATIVE_BLOCK_ITEMS, ...CREATIVE_EGG_ITEMS]) {
-        itemGrid.append(this.createItemButton(item, Infinity));
-      }
-    } else if (view.items.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'inventory-empty';
-      empty.textContent = 'Mine blocks to collect them.';
-      itemGrid.append(empty);
-    } else {
-      for (const item of view.items) itemGrid.append(this.createItemButton(item.id, item.count));
+    const pageItems = inventoryItems.slice(
+      this.inventoryPage * INVENTORY_PAGE_SIZE,
+      (this.inventoryPage + 1) * INVENTORY_PAGE_SIZE,
+    );
+    for (let index = 0; index < INVENTORY_PAGE_SIZE; index++) {
+      const item = pageItems[index];
+      itemGrid.append(
+        item === undefined ? this.createEmptyInventorySlot() : this.createItemButton(item.id, item.count),
+      );
     }
+
+    const hotbarHeading = document.createElement('h3');
+    hotbarHeading.textContent = 'Hotbar';
+    const inventoryHotbar = document.createElement('div');
+    inventoryHotbar.className = 'inventory-hotbar-grid';
+    for (let index = 0; index < HOTBAR_SIZE; index++) {
+      const item = view.hotbar[index];
+      const slot =
+        item === null ? this.createEmptyInventorySlot() : this.createItemButton(item.id, item.count);
+      slot.classList.toggle('is-selected', index === view.selectedSlot);
+      inventoryHotbar.append(slot);
+    }
+
+    const emptyHint = document.createElement('p');
+    emptyHint.className = 'inventory-empty';
+    emptyHint.textContent = 'Mine blocks or defeat creatures to collect items.';
+    emptyHint.classList.toggle('is-hidden', view.creative || inventoryItems.length !== 0);
 
     const craftingHeading = document.createElement('h3');
     craftingHeading.textContent = 'Quick crafting';
@@ -358,7 +406,15 @@ export class Hud {
       recipes.append(button);
     }
 
-    this.inventoryBody.append(itemHeading, itemGrid, craftingHeading, recipes);
+    this.inventoryBody.append(
+      sectionHead,
+      emptyHint,
+      itemGrid,
+      hotbarHeading,
+      inventoryHotbar,
+      craftingHeading,
+      recipes,
+    );
   }
 
   private createItemButton(item: ItemId, count: number): HTMLButtonElement {
@@ -366,13 +422,35 @@ export class Hud {
     const button = document.createElement('button');
     button.className = `inventory-item inventory-item--${definition?.kind ?? 'unknown'}`;
     button.type = 'button';
-    button.title = 'Equip in the selected hotbar slot';
-    const name = document.createElement('span');
-    name.textContent = definition?.name ?? 'Unknown item';
+    const name = definition?.name ?? 'Unknown item';
+    button.title = `${name} · equip in selected hotbar slot`;
+    button.setAttribute('aria-label', button.title);
+    const icon = createInventoryItemIcon(item);
+    icon.setAttribute('aria-hidden', 'true');
     const quantity = document.createElement('b');
-    quantity.textContent = Number.isFinite(count) ? String(count) : '∞';
-    button.append(name, quantity);
+    quantity.textContent = Number.isFinite(count) && count > 1 ? String(count) : '';
+    button.append(icon, quantity);
     button.addEventListener('click', () => this.game.assignHotbar(item));
+    return button;
+  }
+
+  private createEmptyInventorySlot(): HTMLElement {
+    const slot = document.createElement('span');
+    slot.className = 'inventory-item inventory-item--empty';
+    slot.setAttribute('aria-hidden', 'true');
+    return slot;
+  }
+
+  private createPagerButton(label: string, accessibleName: string, direction: number): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.className = 'inventory-pager__button';
+    button.type = 'button';
+    button.textContent = label;
+    button.setAttribute('aria-label', accessibleName);
+    button.addEventListener('click', () => {
+      this.inventoryPage += direction;
+      this.renderInventory();
+    });
     return button;
   }
 
@@ -391,27 +469,94 @@ export class Hud {
   private createPauseOverlay(): HTMLElement {
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
-    overlay.innerHTML = `
-      <div class="overlay__panel">
-        <h1 class="overlay__title">Craft<span>js</span></h1>
-        <p class="overlay__hint">Click anywhere to resume</p>
-        <dl class="controls">
-          <div><dt>Move</dt><dd>W A S D</dd></div>
-          <div><dt>Jump / Ascend</dt><dd>Space</dd></div>
-          <div><dt>Sneak / Descend</dt><dd>Shift</dd></div>
-          <div><dt>Sprint</dt><dd>Ctrl</dd></div>
-          <div><dt>Mine / Attack</dt><dd>Hold left click</dd></div>
-          <div><dt>Place block</dt><dd>Right click</dd></div>
-          <div><dt>Select block</dt><dd>1 – 9 / Scroll</dd></div>
-          <div><dt>Inventory / Crafting</dt><dd>E</dd></div>
-          <div><dt>Survival / Creative</dt><dd>G</dd></div>
-          <div><dt>Toggle flight</dt><dd>F <span class="muted">(creative)</span></dd></div>
-          <div><dt>Debug info</dt><dd>F3</dd></div>
-          <div><dt>Pause</dt><dd>Esc</dd></div>
-        </dl>
-      </div>
+
+    // Main pause menu view
+    const menuPanel = document.createElement('div');
+    menuPanel.className = 'pause-menu';
+
+    const title = document.createElement('h1');
+    title.className = 'pause-menu__title';
+    title.innerHTML = 'Craft<span>js</span>';
+
+    const resumeBtn = document.createElement('button');
+    resumeBtn.className = 'pause-menu__button';
+    resumeBtn.textContent = 'Resume';
+    resumeBtn.addEventListener('click', () => this.handleResume());
+
+    const settingsBtn = document.createElement('button');
+    settingsBtn.className = 'pause-menu__button';
+    settingsBtn.textContent = 'Settings';
+    settingsBtn.addEventListener('click', () => this.showSettings());
+
+    const exitBtn = document.createElement('button');
+    exitBtn.className = 'pause-menu__button';
+    exitBtn.textContent = 'Exit';
+    exitBtn.addEventListener('click', () => this.handleExit());
+
+    menuPanel.append(title, resumeBtn, settingsBtn, exitBtn);
+
+    // Settings sub-view (hidden by default)
+    const settingsPanel = document.createElement('div');
+    settingsPanel.className = 'pause-menu pause-menu--settings is-hidden';
+
+    const settingsTitle = document.createElement('h2');
+    settingsTitle.className = 'pause-menu__title';
+    settingsTitle.textContent = 'Controls';
+
+    const controlsList = document.createElement('dl');
+    controlsList.className = 'controls';
+    controlsList.innerHTML = `
+      <div><dt>Move</dt><dd>W A S D</dd></div>
+      <div><dt>Jump / Ascend</dt><dd>Space</dd></div>
+      <div><dt>Sneak / Descend</dt><dd>Shift</dd></div>
+      <div><dt>Sprint</dt><dd>Ctrl</dd></div>
+      <div><dt>Mine / Attack</dt><dd>Hold left click</dd></div>
+      <div><dt>Place / Use</dt><dd>Right click</dd></div>
+      <div><dt>Ride horse or cart</dt><dd>Right click <span class="muted">(saddle for a horse)</span></dd></div>
+      <div><dt>Dismount</dt><dd>Shift</dd></div>
+      <div><dt>Sleep</dt><dd>Right click a bed <span class="muted">(night or storm)</span></dd></div>
+      <div><dt>Select block</dt><dd>1 – 9 / Scroll</dd></div>
+      <div><dt>Inventory / Crafting</dt><dd>E</dd></div>
+      <div><dt>Survival / Creative</dt><dd>G</dd></div>
+      <div><dt>Toggle flight</dt><dd>F <span class="muted">(creative)</span></dd></div>
+      <div><dt>Debug info</dt><dd>F3</dd></div>
     `;
+
+    const backBtn = document.createElement('button');
+    backBtn.className = 'pause-menu__button';
+    backBtn.textContent = 'Back';
+    backBtn.addEventListener('click', () => this.hideSettings());
+
+    settingsPanel.append(settingsTitle, controlsList, backBtn);
+
+    overlay.append(menuPanel, settingsPanel);
     return overlay;
+  }
+
+  /** Re-acquires pointer lock to resume gameplay. */
+  private handleResume(): void {
+    this.game.requestPointerLock();
+  }
+
+  /** Shows the settings/controls sub-view. */
+  private showSettings(): void {
+    const menu = this.overlay.querySelector<HTMLElement>('.pause-menu');
+    const settings = this.overlay.querySelector<HTMLElement>('.pause-menu--settings');
+    menu?.classList.add('is-hidden');
+    settings?.classList.remove('is-hidden');
+  }
+
+  /** Returns to the main pause menu. */
+  private hideSettings(): void {
+    const menu = this.overlay.querySelector<HTMLElement>('.pause-menu');
+    const settings = this.overlay.querySelector<HTMLElement>('.pause-menu--settings');
+    menu?.classList.remove('is-hidden');
+    settings?.classList.add('is-hidden');
+  }
+
+  /** Exits to the main menu. */
+  private handleExit(): void {
+    this.game.exitToTitle();
   }
 
   private createDeathOverlay(): HTMLElement {
@@ -481,6 +626,7 @@ function formatDebug(info: GameDebugInfo): string {
     `Health  ${info.health} / ${info.maxHealth}`,
     `Chunks  ${info.loadedChunks} loaded · dist ${info.renderDistance} · ${info.pendingGeneration} queued · ${info.meshesInFlight} meshing`,
     `Mobs  ${info.entities} (${info.hostiles} hostile)`,
+    `Drops  ${info.itemDrops}`,
     `Draws  ${info.drawCalls}   Tris  ${formatCount(info.triangles)}`,
     `Target  ${target}`,
     `Saves  ${info.persistence}`,

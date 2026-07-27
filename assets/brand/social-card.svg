@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-labelledby="title desc">
+  <title id="title">Craftjs — stable worlds, one block at a time</title>
+  <desc id="desc">Social preview for Craftjs, a deterministic browser voxel sandbox.</desc>
+  <defs>
+    <linearGradient id="bg" x1="70" y1="30" x2="1220" y2="620" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#17394a"/>
+      <stop offset=".48" stop-color="#101820"/>
+      <stop offset="1" stop-color="#081015"/>
+    </linearGradient>
+    <radialGradient id="blue-glow" cx="0" cy="0" r="1" gradientTransform="translate(1005 185) rotate(140) scale(560 450)">
+      <stop stop-color="#53b7e8" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#53b7e8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="gold-glow" cx="0" cy="0" r="1" gradientTransform="translate(1090 390) scale(270)">
+      <stop stop-color="#f6c85f" stop-opacity=".14"/>
+      <stop offset="1" stop-color="#f6c85f" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M17 0 34 8.5 17 17 0 8.5Z" fill="none" stroke="#8fdfff" stroke-opacity=".055"/>
+      <path d="M0 8.5 17 17v17M34 8.5 17 17" fill="none" stroke="#8fdfff" stroke-opacity=".03"/>
+    </pattern>
+    <filter id="mark-shadow" x="-30%" y="-30%" width="170%" height="190%">
+      <feDropShadow dx="0" dy="14" stdDeviation="12" flood-color="#000" flood-opacity=".45"/>
+    </filter>
+    <g id="voxel">
+      <path d="M14 0 28 7 14 14 0 7Z" fill="#8fdfff"/>
+      <path d="M0 7 14 14v16L0 23Z" fill="#53b7e8"/>
+      <path d="m14 14 14-7v16l-14 7Z" fill="#277c99"/>
+    </g>
+    <g id="next-voxel">
+      <path d="M10 0 20 5 10 10 0 5Z" fill="#ffe59a"/>
+      <path d="m0 5 10 5v12L0 17Z" fill="#f6c85f"/>
+      <path d="m10 10 10-5v12l-10 5Z" fill="#d89d28"/>
+    </g>
+    <style>
+      .sans { font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="640" rx="36" fill="url(#bg)"/>
+  <rect width="1280" height="640" rx="36" fill="url(#blue-glow)"/>
+  <rect width="1280" height="640" rx="36" fill="url(#gold-glow)"/>
+  <rect x="28" y="28" width="1224" height="584" rx="28" fill="url(#grid)" stroke="#fff" stroke-opacity=".08"/>
+
+  <g transform="translate(76 64)">
+    <g transform="scale(.88)">
+      <use href="#voxel" x="15" y="10"/>
+      <use href="#voxel" x="44" y="10"/>
+      <use href="#voxel" x="73" y="10"/>
+      <use href="#voxel" x="15" y="39"/>
+      <use href="#voxel" x="15" y="68"/>
+      <use href="#voxel" x="44" y="68"/>
+      <use href="#voxel" x="73" y="68"/>
+      <use href="#next-voxel" x="101" y="43"/>
+    </g>
+    <text x="132" y="77" class="sans" fill="#f4f7f2" font-size="64" font-weight="900" letter-spacing="-3">craft<tspan fill="#8fdfff">js</tspan></text>
+  </g>
+
+  <text x="78" y="276" class="sans" fill="#f4f7f2" font-size="55" font-weight="780" letter-spacing="-1.8">Stable worlds.</text>
+  <text x="78" y="342" class="sans" fill="#f6c85f" font-size="55" font-weight="780" letter-spacing="-1.8">One block at a time.</text>
+  <text x="80" y="397" class="sans" fill="#b8c7cf" font-size="22">A deterministic voxel sandbox built for the browser.</text>
+
+  <g transform="translate(80 474)" class="mono" font-size="17" font-weight="700">
+    <g>
+      <rect width="188" height="48" rx="24" fill="#f4f7f2" fill-opacity=".07" stroke="#fff" stroke-opacity=".12"/>
+      <text x="94" y="31" text-anchor="middle" fill="#8fdfff">browser-native</text>
+    </g>
+    <g transform="translate(202)">
+      <rect width="196" height="48" rx="24" fill="#f4f7f2" fill-opacity=".07" stroke="#fff" stroke-opacity=".12"/>
+      <text x="98" y="31" text-anchor="middle" fill="#a7d948">deterministic</text>
+    </g>
+    <g transform="translate(412)">
+      <rect width="166" height="48" rx="24" fill="#f4f7f2" fill-opacity=".07" stroke="#fff" stroke-opacity=".12"/>
+      <text x="83" y="31" text-anchor="middle" fill="#f6c85f">minimal setup</text>
+    </g>
+  </g>
+
+  <g transform="translate(835 125) scale(2.7)" filter="url(#mark-shadow)">
+    <use href="#voxel" x="15" y="10"/>
+    <use href="#voxel" x="44" y="10"/>
+    <use href="#voxel" x="73" y="10"/>
+    <use href="#voxel" x="15" y="39"/>
+    <use href="#voxel" x="15" y="68"/>
+    <use href="#voxel" x="44" y="68"/>
+    <use href="#voxel" x="73" y="68"/>
+    <use href="#next-voxel" x="101" y="43"/>
+  </g>
+</svg>

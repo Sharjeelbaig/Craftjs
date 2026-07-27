@@ -193,7 +193,88 @@ const painters: Record<number, Painter> = {
       for (let x = 6; x <= 9; x++) setPixel(tile, x, y, 196, 166, 72);
     }
   },
+  // Ores are stone with embedded mineral blobs, so they read as "stone with
+  // something in it" at a glance and stay legible in dim cave light.
+  [TextureId.CoalOre]: (tile, random) => oreTile(tile, random, 32, 32, 36),
+  [TextureId.IronOre]: (tile, random) => oreTile(tile, random, 206, 168, 142),
+  [TextureId.GoldOre]: (tile, random) => oreTile(tile, random, 238, 200, 78),
+  [TextureId.DiamondOre]: (tile, random) => oreTile(tile, random, 106, 226, 224),
+  [TextureId.Rail]: (tile, random) => {
+    // Rails are drawn on the top face of a very flat block, so the tile is a
+    // top-down view: two steel rails over wooden sleepers.
+    noisyFill(tile, random, 132, 108, 76, 12);
+    for (let y = 1; y < TILE_SIZE; y += 4) {
+      for (let x = 2; x < TILE_SIZE - 2; x++) {
+        const shade = (random() - 0.5) * 12;
+        setPixel(tile, x, y, clampByte(96 + shade), clampByte(74 + shade), clampByte(48 + shade));
+      }
+    }
+    for (const x of [3, 4, 11, 12]) {
+      for (let y = 0; y < TILE_SIZE; y++) {
+        const shade = (random() - 0.5) * 16;
+        const bright = x === 4 || x === 11 ? 196 : 152;
+        setPixel(tile, x, y, clampByte(bright + shade), clampByte(bright + shade), clampByte(bright + 8 + shade));
+      }
+    }
+  },
+  [TextureId.BedTop]: (tile, random) => {
+    // Red blanket over most of the block with a pale pillow at one end.
+    noisyFill(tile, random, 168, 46, 44, 12);
+    for (let y = 0; y < 5; y++) {
+      for (let x = 1; x < TILE_SIZE - 1; x++) {
+        const shade = (random() - 0.5) * 10;
+        setPixel(tile, x, y, clampByte(232 + shade), clampByte(230 + shade), clampByte(222 + shade));
+      }
+    }
+    for (let y = 6; y < TILE_SIZE; y += 5) {
+      for (let x = 0; x < TILE_SIZE; x++) setPixel(tile, x, y, 138, 34, 34);
+    }
+  },
+  [TextureId.BedSide]: (tile, random) => {
+    // Wooden frame below, mattress and blanket above.
+    noisyFill(tile, random, 142, 104, 62, 10);
+    for (let y = 0; y < 6; y++) {
+      for (let x = 0; x < TILE_SIZE; x++) {
+        const shade = (random() - 0.5) * 12;
+        setPixel(tile, x, y, clampByte(172 + shade), clampByte(48 + shade), clampByte(46 + shade));
+      }
+    }
+    for (let y = 6; y < 9; y++) {
+      for (let x = 0; x < TILE_SIZE; x++) {
+        const shade = (random() - 0.5) * 8;
+        setPixel(tile, x, y, clampByte(228 + shade), clampByte(226 + shade), clampByte(218 + shade));
+      }
+    }
+  },
 };
+
+/** Stone base with a scatter of rounded mineral blobs. */
+function oreTile(
+  tile: Uint8Array,
+  random: () => number,
+  r: number,
+  g: number,
+  b: number,
+): void {
+  noisyFill(tile, random, 128, 128, 132, 16);
+  scatterSpecks(tile, random, 22, 104, 104, 108);
+
+  const blobs = 4 + Math.floor(random() * 3);
+  for (let i = 0; i < blobs; i++) {
+    const cx = 2 + Math.floor(random() * (TILE_SIZE - 4));
+    const cy = 2 + Math.floor(random() * (TILE_SIZE - 4));
+    const radius = 1.4 + random() * 1.2;
+
+    for (let y = Math.floor(cy - radius); y <= Math.ceil(cy + radius); y++) {
+      for (let x = Math.floor(cx - radius); x <= Math.ceil(cx + radius); x++) {
+        if (x < 0 || y < 0 || x >= TILE_SIZE || y >= TILE_SIZE) continue;
+        if (Math.hypot(x - cx, y - cy) > radius) continue;
+        const shade = (random() - 0.5) * 26;
+        setPixel(tile, x, y, clampByte(r + shade), clampByte(g + shade), clampByte(b + shade));
+      }
+    }
+  }
+}
 
 function scatterSpecks(
   tile: Uint8Array,

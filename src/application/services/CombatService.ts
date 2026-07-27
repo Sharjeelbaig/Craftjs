@@ -1,5 +1,7 @@
 import { applyDamage, applyKnockback, fallDamageFor } from '@domain/combat/Combat';
 import type { Mob } from '@domain/entity/Mob';
+import { attackDamageFor } from '@domain/inventory/Tool';
+import type { ItemId } from '@domain/inventory/Item';
 import {
   PLAYER_ATTACK_COOLDOWN,
   PLAYER_ATTACK_DAMAGE,
@@ -19,9 +21,16 @@ export interface AttackOutcome {
   readonly hit: boolean;
   readonly killed: boolean;
   readonly targetName: string | null;
+  /** Damage the swing actually dealt; zero on a miss. */
+  readonly damage: number;
 }
 
-const MISSED: AttackOutcome = Object.freeze({ hit: false, killed: false, targetName: null });
+const MISSED: AttackOutcome = Object.freeze({
+  hit: false,
+  killed: false,
+  targetName: null,
+  damage: 0,
+});
 
 /**
  * Resolves fighting in both directions.
@@ -47,12 +56,15 @@ export class CombatService {
   findTarget(player: Player): Mob | null {
     const eye = player.eyePosition;
     const direction = player.lookDirection;
+    // The crosshair sits inside whatever the player is riding, so a swing from
+    // the saddle would otherwise always land on their own mount.
+    const ridden = this.entities.ridden;
 
     let closest: Mob | null = null;
     let closestDistance = PLAYER_REACH;
 
     for (const mob of this.entities.all()) {
-      if (!mob.isAlive) continue;
+      if (!mob.isAlive || mob === ridden) continue;
 
       const definition = mob.definition;
       const half = definition.width / 2 + AIM_FORGIVENESS;
@@ -80,8 +92,13 @@ export class CombatService {
     return closest;
   }
 
-  /** Swings at the targeted creature. Returns what happened. */
-  attack(player: Player): AttackOutcome {
+  /**
+   * Swings at the targeted creature. Returns what happened.
+   *
+   * The held item sets the damage, so a sword is worth carrying and worth
+   * seeing in hand. An empty hand falls back to the bare-handed value.
+   */
+  attack(player: Player, weapon: ItemId | null = null): AttackOutcome {
     if (player.isDead || player.attackCooldown > 0) return MISSED;
 
     const target = this.findTarget(player);
@@ -89,15 +106,10 @@ export class CombatService {
 
     player.attackCooldown = PLAYER_ATTACK_COOLDOWN;
     const name = target.definition.name;
-    const killed = this.entities.damage(
-      target,
-      PLAYER_ATTACK_DAMAGE,
-      player.x,
-      player.z,
-      PLAYER_KNOCKBACK,
-    );
+    const damage = attackDamageFor(weapon) ?? PLAYER_ATTACK_DAMAGE;
+    const killed = this.entities.damage(target, damage, player.x, player.z, PLAYER_KNOCKBACK);
 
-    return { hit: true, killed, targetName: name };
+    return { hit: true, killed, targetName: name, damage };
   }
 
   /**

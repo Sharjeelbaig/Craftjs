@@ -162,9 +162,21 @@ const ZOMBIE_SHIRT = 0x3a5f8a;
 const ZOMBIE_LEGS = 0x38416b;
 const SPIDER_BODY = 0x2b2320;
 const SPIDER_EYES = 0xa8202a;
+const CAVE_SPIDER_BODY = 0x18333a;
+const CAVE_SPIDER_EYES = 0xd4323c;
+const SKELETON_BONE = 0xc8c4b2;
+const SKELETON_SHADOW = 0x9c998d;
+const CREEPER_GREEN = 0x5b9b42;
+const CREEPER_DARK = 0x204626;
 const PLAYER_SKIN = 0xd9a06c;
 const PLAYER_SHIRT = 0x4c92c3;
 const PLAYER_LEGS = 0x313b55;
+const HORSE_COAT = 0x8a6448;
+const HORSE_MANE = 0x4a3222;
+const HORSE_HOOF = 0x3b2a1d;
+const CART_IRON = 0x9aa0a6;
+const CART_IRON_DARK = 0x6d7378;
+const CART_WHEEL = 0x4b4f53;
 
 const MODELS: Readonly<Record<EntityTypeId, EntityModel>> = Object.freeze({
   [EntityTypeId.Pig]: Object.freeze({
@@ -317,6 +329,121 @@ const MODELS: Readonly<Record<EntityTypeId, EntityModel>> = Object.freeze({
         role: AnimationRole.LimbB,
         colour: PLAYER_LEGS,
       }),
+    ]),
+  }),
+
+  [EntityTypeId.Skeleton]: Object.freeze({
+    swingAmplitude: 0.72,
+    parts: Object.freeze([
+      part({ size: [8, 12, 4], pivot: [0, 18, 0], colour: SKELETON_SHADOW }),
+      part({ size: [8, 8, 8], pivot: [0, 28, 0], role: AnimationRole.Head, colour: SKELETON_BONE }),
+      part({ size: [2, 2, 1], pivot: [-2, 29, -4.5], role: AnimationRole.Head, colour: 0x242424 }),
+      part({ size: [2, 2, 1], pivot: [2, 29, -4.5], role: AnimationRole.Head, colour: 0x242424 }),
+      part({
+        size: [3, 12, 3],
+        pivot: [-5.5, 23, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbB,
+        colour: SKELETON_BONE,
+      }),
+      part({
+        size: [3, 12, 3],
+        pivot: [5.5, 23, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbA,
+        colour: SKELETON_BONE,
+      }),
+      part({
+        size: [3, 12, 3],
+        pivot: [-2, 12, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbA,
+        colour: SKELETON_BONE,
+      }),
+      part({
+        size: [3, 12, 3],
+        pivot: [2, 12, 0],
+        centre: [0, -6, 0],
+        role: AnimationRole.LimbB,
+        colour: SKELETON_BONE,
+      }),
+    ]),
+  }),
+
+  [EntityTypeId.Creeper]: Object.freeze({
+    swingAmplitude: 0.45,
+    parts: Object.freeze([
+      part({ size: [8, 12, 4], pivot: [0, 14, 0], colour: CREEPER_GREEN }),
+      part({ size: [8, 8, 8], pivot: [0, 24, 0], role: AnimationRole.Head, colour: CREEPER_GREEN }),
+      part({ size: [2, 2, 1], pivot: [-2, 25, -4.5], role: AnimationRole.Head, colour: CREEPER_DARK }),
+      part({ size: [2, 2, 1], pivot: [2, 25, -4.5], role: AnimationRole.Head, colour: CREEPER_DARK }),
+      part({ size: [3, 3, 1], pivot: [0, 21.5, -4.5], role: AnimationRole.Head, colour: CREEPER_DARK }),
+      ...quadrupedLegs(4, 6, 2, 2, 6, 0x4f8839),
+    ]),
+  }),
+
+  [EntityTypeId.CaveSpider]: Object.freeze({
+    swingAmplitude: 0.42,
+    parts: Object.freeze([
+      part({ size: [8, 5, 9], pivot: [0, 5, 4], colour: CAVE_SPIDER_BODY }),
+      part({ size: [7, 5, 5], pivot: [0, 5, -3], colour: 0x21464d }),
+      part({ size: [6, 4, 6], pivot: [0, 5, -7], role: AnimationRole.Head, colour: CAVE_SPIDER_BODY }),
+      part({ size: [2, 1, 1], pivot: [-1.7, 6, -10.5], role: AnimationRole.Head, colour: CAVE_SPIDER_EYES }),
+      part({ size: [2, 1, 1], pivot: [1.7, 6, -10.5], role: AnimationRole.Head, colour: CAVE_SPIDER_EYES }),
+      ...spiderLegs(0x162f35),
+    ]),
+  }),
+
+  [EntityTypeId.Horse]: Object.freeze({
+    swingAmplitude: 0.58,
+    parts: Object.freeze([
+      part({ size: [11, 11, 22], pivot: [0, 19, 0], colour: HORSE_COAT }),
+      // Neck rises forward from the shoulder, with the head on its end.
+      part({
+        size: [5, 14, 6],
+        pivot: [0, 24, -8],
+        centre: [0, 4, -2],
+        rotation: [-0.62, 0, 0],
+        role: AnimationRole.Head,
+        colour: HORSE_COAT,
+      }),
+      part({ size: [5, 6, 10], pivot: [0, 32, -14], role: AnimationRole.Head, colour: HORSE_COAT }),
+      part({ size: [2, 3, 2], pivot: [-1.6, 35.5, -12], role: AnimationRole.Head, colour: HORSE_COAT }),
+      part({ size: [2, 3, 2], pivot: [1.6, 35.5, -12], role: AnimationRole.Head, colour: HORSE_COAT }),
+      // Mane along the neck and a tail off the rump.
+      part({
+        size: [2, 14, 5],
+        pivot: [0, 25, -7],
+        centre: [0, 4, 0],
+        rotation: [-0.62, 0, 0],
+        role: AnimationRole.Head,
+        colour: HORSE_MANE,
+      }),
+      part({
+        size: [3, 12, 3],
+        pivot: [0, 26, 11],
+        centre: [0, -5, 1],
+        rotation: [0.45, 0, 0],
+        colour: HORSE_MANE,
+      }),
+      ...quadrupedLegs(4, 14, 4, 8, 14, HORSE_COAT),
+      ...quadrupedLegs(4.4, 3, 4, 8, 3, HORSE_HOOF),
+    ]),
+  }),
+
+  [EntityTypeId.Minecart]: Object.freeze({
+    // A cart has no limbs to swing; the wheels are fixed to the body.
+    swingAmplitude: 0,
+    parts: Object.freeze([
+      part({ size: [16, 2, 16], pivot: [0, 4, 0], colour: CART_IRON_DARK }),
+      part({ size: [16, 8, 2], pivot: [0, 9, -7], colour: CART_IRON }),
+      part({ size: [16, 8, 2], pivot: [0, 9, 7], colour: CART_IRON }),
+      part({ size: [2, 8, 16], pivot: [-7, 9, 0], colour: CART_IRON }),
+      part({ size: [2, 8, 16], pivot: [7, 9, 0], colour: CART_IRON }),
+      part({ size: [4, 4, 2], pivot: [-5, 2, -5], colour: CART_WHEEL }),
+      part({ size: [4, 4, 2], pivot: [5, 2, -5], colour: CART_WHEEL }),
+      part({ size: [4, 4, 2], pivot: [-5, 2, 5], colour: CART_WHEEL }),
+      part({ size: [4, 4, 2], pivot: [5, 2, 5], colour: CART_WHEEL }),
     ]),
   }),
 });

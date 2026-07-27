@@ -5,6 +5,7 @@ import {
   parseWorldSeed,
   type WorldCreationSettings,
 } from '@domain/world/WorldCreationSettings';
+import wordmarkDarkUrl from '../../assets/brand/wordmark-dark.svg?url';
 
 export interface LaunchOptions {
   readonly creationSettings: WorldCreationSettings;
@@ -40,10 +41,13 @@ export class StartMenu {
 
       const brand = document.createElement('div');
       brand.className = 'start-menu__brand';
-      brand.innerHTML = `
-        <h1>CRAFT<span>JS</span></h1>
-        <p>Stable by design!</p>
-      `;
+      const brandImage = document.createElement('img');
+      brandImage.className = 'start-menu__brand-image';
+      brandImage.src = wordmarkDarkUrl;
+      brandImage.alt = 'Craftjs';
+      const brandPromise = document.createElement('p');
+      brandPromise.textContent = 'Stable worlds. One block at a time.';
+      brand.append(brandImage, brandPromise);
 
       const titleActions = document.createElement('div');
       titleActions.className = 'start-menu__main-actions';

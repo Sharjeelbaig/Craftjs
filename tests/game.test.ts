@@ -80,6 +80,9 @@ class StubInput implements InputSource {
   reset(): void {
     this.resets++;
   }
+  requestCapture(): void {
+    this.isCaptured = true;
+  }
   onCaptureChange(): () => void {
     return () => {};
   }
@@ -204,6 +207,18 @@ describe('Game', () => {
     expect(player.y).toBeGreaterThan(0);
 
     await built.game.dispose();
+  });
+
+  it('save-and-exit persists the session before releasing adapters', async () => {
+    const built = build();
+    await built.game.start();
+    built.game.player.moveTo(8, 70, -3);
+
+    await built.game.saveAndExit();
+
+    expect(built.renderer.disposed).toBe(true);
+    expect(await built.repository.loadPlayer()).toMatchObject({ x: 8, y: 70, z: -3 });
+    expect(await built.repository.loadMetadata()).toMatchObject({ seed: 777, version: 4 });
   });
 
   it('renders once per frame from the eye position', async () => {

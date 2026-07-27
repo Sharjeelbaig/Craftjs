@@ -1,4 +1,6 @@
 import { BlockRegistry, type BlockId } from '@domain/world/BlockType';
+import { miningSpeedFor } from '@domain/inventory/Tool';
+import type { ItemId } from '@domain/inventory/Item';
 import type { RaycastHit } from '@domain/physics/VoxelRaycaster';
 import type { Player } from '@domain/player/Player';
 import type { WorldEditor } from './WorldEditor';
@@ -35,9 +37,16 @@ export class MiningController {
    * Advances mining by one tick.
    *
    * @param held True while the primary button is down.
+   * @param tool The equipped item, which sets the speed multiplier.
    * @returns The block type broken this tick, or null.
    */
-  update(player: Player, target: RaycastHit | null, held: boolean, dt: number): BlockId | null {
+  update(
+    player: Player,
+    target: RaycastHit | null,
+    held: boolean,
+    dt: number,
+    tool: ItemId | null = null,
+  ): BlockId | null {
     if (this.cooldown > 0) this.cooldown = Math.max(0, this.cooldown - dt);
 
     if (!held || target === null || player.isDead) {
@@ -71,7 +80,10 @@ export class MiningController {
       return this.editor.breakBlock(player).ok ? (target.block as BlockId) : null;
     }
 
-    this.progress += dt / hardness;
+    // The right tool divides the block's hardness; the wrong one leaves it
+    // untouched, which is what makes carrying a pickaxe worth the slot.
+    const speed = miningSpeedFor(tool, target.block);
+    this.progress += (dt * speed) / hardness;
     if (this.progress < 1) return null;
 
     this.reset();

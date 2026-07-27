@@ -165,6 +165,9 @@ export function buildChunkMesh(volume: Uint8Array): ChunkMeshData {
 
         const definition = BlockRegistry.get(block);
         const target = definition.translucent ? transparent : opaque;
+        // Flat blocks like rails occupy a fraction of their cell. Only
+        // pass-through blocks may be short, so collision stays whole-voxel.
+        const flattenTo = definition.renderHeight === 1 ? 0 : definition.renderHeight;
 
         for (let faceIndex = 0; faceIndex < 6; faceIndex++) {
           const face = FACES[faceIndex];
@@ -214,6 +217,16 @@ export function buildChunkMesh(volume: Uint8Array): ChunkMeshData {
 
             quadLights[corner] =
               face.shade * AO_LEVELS[vertexOcclusion(side1, side2, diagonal)];
+          }
+
+          // Squashing afterwards, and only for the rare short block, keeps the
+          // per-vertex arithmetic above free of a multiply that every one of the
+          // hundreds of thousands of vertices in a chunk would otherwise pay.
+          if (flattenTo !== 0) {
+            for (let corner = 0; corner < 4; corner++) {
+              const index = corner * 3 + 1;
+              quadPositions[index] = y + (quadPositions[index] - y) * flattenTo;
+            }
           }
 
           target.addQuad(quadPositions, quadUvs, definition.textures[faceIndex], quadLights);

@@ -252,6 +252,12 @@ export class BrowserInput implements InputSource {
       case 'Enter':
         this.actions.push(InputAction.Respawn);
         break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        // Shift is sneak on foot and dismount in the saddle; the game decides
+        // which applies, so the adapter emits it unconditionally.
+        if (this.captured) this.actions.push(InputAction.Dismount);
+        break;
       case 'F3':
         event.preventDefault();
         this.actions.push(InputAction.ToggleDebug);

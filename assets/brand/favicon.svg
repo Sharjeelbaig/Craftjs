@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512" role="img" aria-label="Craftjs">
+  <rect width="64" height="64" rx="14" fill="#101820"/>
+  <g transform="translate(7 9) scale(.44)">
+    <path d="M14 0 28 7 14 14 0 7Z" fill="#8fdfff"/>
+    <path d="M0 7 14 14v16L0 23Z" fill="#53b7e8"/>
+    <path d="m14 14 14-7v16l-14 7Z" fill="#277c99"/>
+    <g transform="translate(29)">
+      <path d="M14 0 28 7 14 14 0 7Z" fill="#8fdfff"/>
+      <path d="M0 7 14 14v16L0 23Z" fill="#53b7e8"/>
+      <path d="m14 14 14-7v16l-14 7Z" fill="#277c99"/>
+    </g>
+    <g transform="translate(58)">
+      <path d="M14 0 28 7 14 14 0 7Z" fill="#8fdfff"/>
+      <path d="M0 7 14 14v16L0 23Z" fill="#53b7e8"/>
+      <path d="m14 14 14-7v16l-14 7Z" fill="#277c99"/>
+    </g>
+    <g transform="translate(0 29)">
+      <path d="M14 0 28 7 14 14 0 7Z" fill="#8fdfff"/>
+      <path d="M0 7 14 14v16L0 23Z" fill="#53b7e8"/>
+      <path d="m14 14 14-7v16l-14 7Z" fill="#277c99"/>
+    </g>
+    <g transform="translate(0 58)">
+      <path d="M14 0 28 7 14 14 0 7Z" fill="#8fdfff"/>
+      <path d="M0 7 14 14v16L0 23Z" fill="#53b7e8"/>
+      <path d="m14 14 14-7v16l-14 7Z" fill="#277c99"/>
+    </g>
+    <g transform="translate(29 58)">
+      <path d="M14 0 28 7 14 14 0 7Z" fill="#8fdfff"/>
+      <path d="M0 7 14 14v16L0 23Z" fill="#53b7e8"/>
+      <path d="m14 14 14-7v16l-14 7Z" fill="#277c99"/>
+    </g>
+    <g transform="translate(58 58)">
+      <path d="M14 0 28 7 14 14 0 7Z" fill="#8fdfff"/>
+      <path d="M0 7 14 14v16L0 23Z" fill="#53b7e8"/>
+      <path d="m14 14 14-7v16l-14 7Z" fill="#277c99"/>
+    </g>
+  </g>
+  <g transform="translate(48 26) scale(.5)">
+    <path d="M10 0 20 5 10 10 0 5Z" fill="#ffe59a"/>
+    <path d="m0 5 10 5v12L0 17Z" fill="#f6c85f"/>
+    <path d="m10 10 10-5v12l-10 5Z" fill="#d89d28"/>
+  </g>
+</svg>

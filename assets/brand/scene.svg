@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" width="640" height="640" role="img" aria-labelledby="title desc">
+  <title id="title">Craftjs open chunk brand scene</title>
+  <desc id="desc">The Craftjs voxel C floats above a subtle chunk grid while its gold next block gently moves.</desc>
+  <defs>
+    <radialGradient id="surface" cx="0" cy="0" r="1" gradientTransform="translate(430 165) rotate(132) scale(520)">
+      <stop stop-color="#1d5f78"/>
+      <stop offset=".58" stop-color="#101820"/>
+      <stop offset="1" stop-color="#0a1117"/>
+    </radialGradient>
+    <pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse">
+      <path d="M21 0 42 10.5 21 21 0 10.5Z" fill="none" stroke="#8fdfff" stroke-opacity=".08"/>
+      <path d="M0 10.5 21 21v21M42 10.5 21 21" fill="none" stroke="#8fdfff" stroke-opacity=".045"/>
+    </pattern>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%">
+      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#000" flood-opacity=".48"/>
+    </filter>
+    <g id="voxel">
+      <path d="M14 0 28 7 14 14 0 7Z" fill="#8fdfff"/>
+      <path d="M0 7 14 14v16L0 23Z" fill="#53b7e8"/>
+      <path d="m14 14 14-7v16l-14 7Z" fill="#277c99"/>
+    </g>
+    <g id="next-voxel">
+      <path d="M10 0 20 5 10 10 0 5Z" fill="#ffe59a"/>
+      <path d="m0 5 10 5v12L0 17Z" fill="#f6c85f"/>
+      <path d="m10 10 10-5v12l-10 5Z" fill="#d89d28"/>
+    </g>
+    <style>
+      @keyframes chunk-float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
+      }
+      @keyframes next-block {
+        0%, 100% { transform: translate(101px, 43px); }
+        50% { transform: translate(108px, 38px); }
+      }
+      .chunk { animation: chunk-float 5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      .next { animation: next-block 2.8s ease-in-out infinite; }
+      @media (prefers-reduced-motion: reduce) {
+        .chunk, .next { animation: none; }
+        .next { transform: translate(101px, 43px); }
+      }
+    </style>
+  </defs>
+
+  <rect x="18" y="18" width="604" height="604" rx="118" fill="url(#surface)"/>
+  <rect x="34" y="34" width="572" height="572" rx="104" fill="url(#grid)" stroke="#fff" stroke-opacity=".08"/>
+  <circle cx="450" cy="176" r="118" fill="#53b7e8" opacity=".09"/>
+  <circle cx="462" cy="184" r="62" fill="#f6c85f" opacity=".075"/>
+
+  <g class="chunk" filter="url(#shadow)" transform="translate(113 110) scale(3.2)">
+    <use href="#voxel" x="15" y="10"/>
+    <use href="#voxel" x="44" y="10"/>
+    <use href="#voxel" x="73" y="10"/>
+    <use href="#voxel" x="15" y="39"/>
+    <use href="#voxel" x="15" y="68"/>
+    <use href="#voxel" x="44" y="68"/>
+    <use href="#voxel" x="73" y="68"/>
+    <g class="next">
+      <use href="#next-voxel"/>
+    </g>
+  </g>
+
+  <text x="320" y="555" text-anchor="middle" fill="#f4f7f2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" font-weight="700" letter-spacing="2">STABLE · DETERMINISTIC · OPEN</text>
+</svg>

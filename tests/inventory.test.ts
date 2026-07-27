@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { Inventory } from '@domain/inventory/Inventory';
 import { RECIPES, canCraft, craft } from '@domain/inventory/Crafting';
-import { blockItem, itemDefinition, spawnEggItem } from '@domain/inventory/Item';
+import {
+  CREATIVE_CATALOG_ITEMS,
+  CREATIVE_EGG_ITEMS,
+  ResourceItemId,
+  blockItem,
+  catalogItem,
+  itemDefinition,
+  resourceItem,
+  spawnEggItem,
+} from '@domain/inventory/Item';
 import { EntityTypeId } from '@domain/entity/EntityType';
 import { BlockId } from '@domain/world/BlockType';
 
@@ -49,5 +58,45 @@ describe('Inventory', () => {
     const egg = itemDefinition(spawnEggItem(EntityTypeId.Cow));
     expect(egg?.kind).toBe('spawnEgg');
     expect(egg?.name).toContain('Cow');
+  });
+
+  it('persists resource drops as typed inventory items', () => {
+    const pork = resourceItem(ResourceItemId.RawPorkchop);
+    const inventory = new Inventory();
+    inventory.add(pork, 2);
+
+    const restored = Inventory.fromSnapshot(inventory.toSnapshot());
+    expect(restored.count(pork)).toBe(2);
+    expect(itemDefinition(pork)?.kind).toBe('resource');
+  });
+
+  it('registers the complete creative item catalogue without duplicate ids', () => {
+    expect(CREATIVE_CATALOG_ITEMS).toHaveLength(127);
+    expect(CREATIVE_EGG_ITEMS).toHaveLength(10);
+    expect(new Set(CREATIVE_CATALOG_ITEMS).size).toBe(CREATIVE_CATALOG_ITEMS.length);
+    expect(CREATIVE_CATALOG_ITEMS.every((item) => itemDefinition(item) !== null)).toBe(true);
+
+    expect(itemDefinition(catalogItem('diamond-sword'))).toMatchObject({
+      name: 'Diamond Sword',
+      kind: 'tool',
+      maxStack: 1,
+    });
+    expect(itemDefinition(catalogItem('golden-apple'))).toMatchObject({
+      name: 'Golden Apple',
+      kind: 'food',
+      maxStack: 64,
+    });
+  });
+
+  it('round-trips a catalogue larger than the former 64-item save limit', () => {
+    const counts = Object.fromEntries(
+      CREATIVE_CATALOG_ITEMS.map((item, index) => [item, index + 1]),
+    );
+    const restored = Inventory.fromSnapshot({ counts, hotbar: [] });
+
+    expect(restored.entries()).toHaveLength(CREATIVE_CATALOG_ITEMS.length);
+    expect(restored.count(CREATIVE_CATALOG_ITEMS.at(-1)!)).toBe(
+      CREATIVE_CATALOG_ITEMS.length,
+    );
   });
 });

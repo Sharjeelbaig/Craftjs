@@ -216,3 +216,59 @@ describe('buildChunkMesh', () => {
     expect(quadCount(result.opaque)).toBe(CHUNK_SIZE * CHUNK_SIZE * 2);
   });
 });
+
+describe('sub-unit block height', () => {
+  it('flattens a rail into its cell instead of filling it', () => {
+    const volume = emptyVolume();
+    put(volume, 4, 8, 4, BlockId.Stone);
+    put(volume, 4, 9, 4, BlockId.Rail);
+
+    const geometry = buildChunkMesh(volume).opaque as MeshGeometry;
+    const railTop = vertices(geometry)
+      .filter(([x, , z]) => x >= 4 && x <= 5 && z >= 4 && z <= 5)
+      .map(([, y]) => y)
+      .filter((y) => y > 9);
+
+    expect(railTop.length).toBeGreaterThan(0);
+    // The rail's own top sits a fraction above its floor, not a whole block.
+    for (const y of railTop) {
+      expect(y).toBeGreaterThan(9);
+      expect(y).toBeLessThan(9.2);
+    }
+  });
+
+  it('still builds full-height cubes for ordinary blocks', () => {
+    const volume = emptyVolume();
+    put(volume, 4, 8, 4, BlockId.Stone);
+
+    const geometry = buildChunkMesh(volume).opaque as MeshGeometry;
+    const ys = new Set(vertices(geometry).map(([, y]) => y));
+    expect(ys).toEqual(new Set([8, 9]));
+  });
+
+  it('joins adjacent rails without drawing a wall between them', () => {
+    const volume = emptyVolume();
+    for (const x of [4, 5]) {
+      put(volume, x, 8, 4, BlockId.Stone);
+      put(volume, x, 9, 4, BlockId.Rail);
+    }
+
+    const single = emptyVolume();
+    put(single, 4, 8, 4, BlockId.Stone);
+    put(single, 4, 9, 4, BlockId.Rail);
+
+    // Two joined rails cost fewer than twice one rail: the shared faces are
+    // culled, which is what makes a long line cheap to draw.
+    const pair = quadCount(buildChunkMesh(volume).opaque);
+    const lone = quadCount(buildChunkMesh(single).opaque);
+    expect(pair).toBeLessThan(lone * 2);
+  });
+
+  it('emits every ore block as solid geometry', () => {
+    for (const ore of [BlockId.CoalOre, BlockId.IronOre, BlockId.GoldOre, BlockId.DiamondOre]) {
+      const volume = emptyVolume();
+      put(volume, 4, 8, 4, ore);
+      expect(quadCount(buildChunkMesh(volume).opaque), `ore ${ore}`).toBe(6);
+    }
+  });
+});

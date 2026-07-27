@@ -13,6 +13,7 @@ export const EditRejection = {
   Occupied: 'occupied',
   IntersectsPlayer: 'intersectsPlayer',
   NotLoaded: 'notLoaded',
+  Unsupported: 'unsupported',
 } as const;
 
 export type EditRejection = (typeof EditRejection)[keyof typeof EditRejection];
@@ -82,6 +83,10 @@ export class WorldEditor {
     if (BlockRegistry.isSolid(block) && this.intersectsPlayer(player, x, y, z)) {
       return { ok: false, reason: EditRejection.IntersectsPlayer };
     }
+    // Rails and beds read as floating debris without a floor under them.
+    if (BlockRegistry.needsSupport(block) && !this.world.isSolidAt(x, y - 1, z)) {
+      return { ok: false, reason: EditRejection.Unsupported };
+    }
 
     return this.write(x, y, z, block);
   }
@@ -110,7 +115,25 @@ export class WorldEditor {
     for (const coord of change.affectedChunks) {
       this.streamer.invalidateMesh(coord);
     }
+    if (block === BlockId.Air) this.dropUnsupported(x, y + 1, z);
     return { ok: true, x, y, z };
+  }
+
+  /**
+   * Removes a support-dependent block whose floor just disappeared.
+   *
+   * Only one cell is examined, and only when it holds such a block, so mining
+   * out a hillside cannot cascade into an unbounded sweep of the world.
+   */
+  private dropUnsupported(x: number, y: number, z: number): void {
+    const above = this.world.getBlock(x, y, z);
+    if (above === BlockId.Air || !BlockRegistry.needsSupport(above)) return;
+
+    const change = this.world.setBlock(x, y, z, BlockId.Air);
+    if (change === null) return;
+    for (const coord of change.affectedChunks) {
+      this.streamer.invalidateMesh(coord);
+    }
   }
 
   private intersectsPlayer(player: Player, x: number, y: number, z: number): boolean {

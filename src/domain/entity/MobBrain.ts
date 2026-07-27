@@ -26,7 +26,8 @@ export interface BrainInput {
   readonly playerZ: number;
   /** False when the player is dead or in creative — nothing to hunt. */
   readonly playerTargetable: boolean;
-  readonly isNight: boolean;
+  /** Dark enough to hunt: night outside, or under a roof at any hour. */
+  readonly isDark: boolean;
   /** Blocked against terrain last tick; used to decide whether to jump. */
   readonly blocked: boolean;
   readonly random: () => number;
@@ -88,10 +89,10 @@ export function startFleeing(mob: Mob, fromX: number, fromZ: number): void {
 function chooseHunt(mob: Mob, input: BrainInput): BrainOutput | null {
   if (!input.playerTargetable) return null;
 
-  // Hostiles only hunt in the dark; daylight sends them back to wandering
+  // Hostiles only hunt in the dark; open daylight sends them back to wandering
   // and, for those that burn, to despawning.
   const engaged = mob.state === BrainState.Chase;
-  if (!input.isNight && !engaged) return null;
+  if (!input.isDark && !engaged) return null;
 
   const definition = mob.definition;
   const range = definition.detectionRange + (engaged ? PURSUIT_SLACK : 0);
@@ -188,10 +189,15 @@ function walkForward(mob: Mob, input: BrainInput): BrainOutput {
   };
 }
 
-/** Rotates `yaw` toward `targetYaw` along the shortest arc. */
-function turnToward(mob: Mob, dt: number): void {
+/**
+ * Rotates `yaw` toward `targetYaw` along the shortest arc.
+ *
+ * Exported because a ridden vehicle turns the same way a wandering creature
+ * does, and duplicating the shortest-arc handling is how the two drift apart.
+ */
+export function turnToward(mob: Mob, dt: number, rate = TURN_RATE): void {
   const difference = shortestAngle(mob.targetYaw - mob.yaw);
-  const blend = clamp(TURN_RATE * dt, 0, 1);
+  const blend = clamp(rate * dt, 0, 1);
   mob.yaw = normaliseAngle(mob.yaw + difference * blend);
 }
 

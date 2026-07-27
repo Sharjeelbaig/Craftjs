@@ -1,9 +1,31 @@
-# Craftjs
+<p align="center">
+  <img src="assets/brand/scene.svg" alt="The Craftjs open-chunk mark floating over a voxel grid" width="210">
+</p>
 
-A minimal, production-ready voxel sandbox engine for the browser. Built around
-stability and correctness rather than feature count: an effectively unbounded
-world, streamed and meshed off the main thread, with a fixed-timestep
-simulation that behaves identically on any hardware.
+<p align="center">
+  <img src="assets/brand/wordmark.svg" alt="Craftjs" width="430">
+</p>
+
+<p align="center"><strong>Stable worlds. One block at a time.</strong></p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#gameplay-baseline">Gameplay</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#testing">Testing</a> ·
+  <a href="#brand">Brand</a>
+</p>
+
+<p align="center">
+  <img src="assets/banner.svg" alt="Craftjs — a deterministic voxel sandbox for the browser" width="100%">
+</p>
+
+Craftjs is a minimal, deterministic voxel sandbox engine for the browser. It is
+built around stability and correctness rather than feature count: an
+effectively unbounded world, streamed and meshed off the main thread, with a
+fixed-timestep simulation that behaves identically on any hardware.
+
+## Quick start
 
 ```bash
 npm install
@@ -23,9 +45,10 @@ options, then click Play.
 | `npm run typecheck` | Typecheck without emitting |
 
 `dist/` is a fully static single-player site — no server and no external asset
-requests. Textures are generated procedurally at start-up. Multiplayer is
-optional: `npm run dev` includes a room relay for development, while
-`npm run build && npm run serve` serves the production bundle and relay together.
+requests. World textures and dropped-item sprites are generated procedurally;
+inventory artwork ships as local SVG pixel assets. Multiplayer is optional:
+`npm run dev` includes a room relay for development, while `npm run build &&
+npm run serve` serves the production bundle and relay together.
 
 ## Controls
 
@@ -51,13 +74,21 @@ both intact. With no `?seed`, the last world played is reopened.
 
 - Survival inventory: mined blocks are collected, placement consumes one, and
   four small recipes cover planks, cobblestone, bricks and glass.
-- Creative inventory: every buildable block and six mob spawn eggs are
-  available from `E`; click an item to equip the selected hotbar slot.
+- Creative inventory: 126 typed catalogue items, every buildable block and nine
+  mob spawn eggs are available from `E` in fixed 27-slot pages above a separate
+  nine-slot hotbar. Click an item to equip the selected hotbar slot.
 - World creation supports Survival, Creative and permanent-death Hardcore,
   Default or Flat terrain, and independent Structures and Bonus Chest options.
   Those choices are immutable metadata: reopening a seed uses its saved
   configuration rather than current menu defaults.
 - The day/night cycle, weather and inventory are saved with the world.
+- Named-world management is a separate application service: create/open,
+  rename, delete and last-played ordering operate on stable world ids, so two
+  worlds may intentionally share one terrain seed without sharing edits.
+- The PSP-era creature catalogue includes Pig, Cow, Chicken, Sheep, Zombie,
+  Spider, Skeleton, Creeper and Cave Spider. Death rolls typed loot into
+  physical, bounded-lifetime item stacks that settle on terrain and must be
+  collected after a short pickup delay.
 - Rain is one depth-tested world-space line field, not a screen overlay. It has
   perspective and parallax while staying bounded to one draw call.
 - Multiplayer rooms sync player presence and block edits. They intentionally do
@@ -77,11 +108,12 @@ src/
 │   ├── generation/    Deterministic noise and terrain synthesis
 │   ├── physics/       AABB collision resolution, voxel raycasting
 │   ├── player/        Player entity, intent, movement rules
+│   ├── entity/        Creature catalogue, brains, spawning, loot, item drops
 │   ├── inventory/     Items, bounded inventory, atomic recipes
 │   └── shared/        Value objects
 ├── application/       Use cases and ports. Depends only on domain.
 │   ├── ports/         Interfaces the outside world must satisfy
-│   ├── services/      ChunkStreamer, WorldEditor
+│   ├── services/      Streaming, editing, entities, world management
 │   ├── GameLoop.ts    Fixed-timestep loop with interpolated rendering
 │   └── Game.ts        Composition root and frame orchestration
 ├── infrastructure/    Adapters. Depends on application + domain.
@@ -89,7 +121,7 @@ src/
 │   ├── network/       Optional reconnecting WebSocket room adapter
 │   ├── meshing/       Greedy-free culled mesher, worker pool
 │   ├── input/         Keyboard + pointer-lock adapter
-│   └── persistence/   IndexedDB and in-memory repositories
+│   └── persistence/   IndexedDB catalog/repositories and memory doubles
 └── presentation/      DOM HUD and bootstrap
 ```
 
@@ -97,8 +129,8 @@ src/
 
 Every boundary the application crosses is an interface in
 `application/ports/`: `GameRenderer`, `InputSource`, `ChunkMesher`,
-`WorldRepository`. The integration tests drive the real `ChunkStreamer` and
-`WorldEditor` against in-memory doubles for all four, with no browser present.
+`WorldRepository`, `WorldCatalog`. The integration tests drive the real
+services against in-memory doubles, with no browser present.
 
 ### World generation presets
 
@@ -140,9 +172,22 @@ the render radius.
 seed, creation settings)`, so a save stores immutable creation metadata, the
 player, and the delta between generated terrain and what the player built. A
 world stays a few kilobytes no matter how far the player travels. Records are
-namespaced by seed: without that, opening a different seed would restore the
-previous world's player position and replay its edits onto unrelated terrain,
-corrupting both saves.
+namespaced by stable world id: without that, opening another world could
+restore the previous player's position and replay its edits onto unrelated
+terrain, corrupting both saves.
+
+**World identity is not the seed.** A catalogue record owns a stable `WorldId`,
+a mutable display name and immutable creation settings. Each id opens a
+separately prefixed repository. Rename touches only the catalogue; delete
+clears that repository before removing its discoverable record, so a failed
+delete remains visible and retryable. `Game.save()` and `Game.saveAndExit()`
+provide explicit session operations in addition to autosave.
+
+**Creature rewards are data, not combat branches.** Creature definitions and
+loot tables live in the domain. A fatal hit creates collectible item entities;
+application code advances physics and pickup, while the renderer receives flat
+item views in bounded instanced sprite layers, one per visible resource type.
+Population and item-drop caps keep both simulation and GPU work bounded.
 
 **Unloaded space is solid.** `World.isSolidAt` reports missing chunks as solid,
 so a player can never fall through terrain that has not streamed in yet.
@@ -165,7 +210,7 @@ costs a single multiply and is independent of how many chunks are on screen.
 
 ## Testing
 
-170 tests covering the parts where correctness is not obvious by inspection:
+185 tests covering the parts where correctness is not obvious by inspection:
 
 - **Collision** — landing, sliding, ceilings, tunnelling at any speed, and an
   invariant sweep asserting the player never ends a step inside geometry.
@@ -186,11 +231,28 @@ costs a single multiply and is independent of how many chunks are on screen.
 - **Game lifecycle** — spawn placement, look input applied once per frame
   regardless of tick count, break/place rules, save/restore round-trips,
   one-time starter loot, Hardcore death/reload/delete semantics, recovery from
-  a snapshot that would bury or NaN the player, clean disposal.
+  a snapshot that would bury or NaN the player, explicit save-and-exit and
+  clean disposal.
+- **World management** — same-seed isolation, named-world ordering,
+  rename-without-generator-mutation, scoped deletion, legacy registration and
+  retryable delete failures.
+- **Creature rewards** — the nine-creature catalogue, deterministic typed loot,
+  physical drop pickup delay, resource-item persistence and reward coverage
+  for every spawnable creature.
+- **Inventory catalogue** — all 126 typed items, nine spawn eggs, large-save
+  round-trips, complete SVG coverage for all 146 creative entries, and a check
+  that transformed icons contain vector pixels rather than embedded rasters.
 
 ```bash
 npm test
 ```
+
+## Brand
+
+The Craftjs identity is **the open chunk**: seven blue voxel cubes form an open
+`C`, with one gold cube representing the player's next intentional change. The
+production logo system, color tokens, voice, accessibility rules and export
+guidance live in the [brand guidelines](assets/brand/BRAND.md).
 
 ## Extending
 

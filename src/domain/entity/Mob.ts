@@ -83,6 +83,26 @@ export class Mob implements PhysicsBody {
   /** Ran into terrain last tick; the brain uses it to decide to jump. */
   blockedLastTick = false;
 
+  /**
+   * True while something opaque stands between this creature and the sky.
+   *
+   * Sampled periodically rather than every tick: the answer needs a vertical
+   * scan of the column, and a creature's shelter cannot change faster than the
+   * player can mine the roof off it.
+   */
+  sheltered = false;
+  /** Seconds until the shelter sample is refreshed. */
+  shelterTimer = 0;
+
+  /**
+   * Signed speed along the rail axis, for rail-bound vehicles.
+   *
+   * Held on the entity rather than derived from its velocity because the
+   * centring correction writes to the perpendicular axis every tick, and
+   * reading momentum back out of a corrected velocity loses it.
+   */
+  railSpeed = 0;
+
   removed = false;
 
   constructor(type: EntityTypeId, x: number, y: number, z: number, yaw = 0) {

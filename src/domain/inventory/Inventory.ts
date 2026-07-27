@@ -2,7 +2,7 @@ import { HOTBAR_BLOCKS } from '../world/BlockType';
 import { blockItem, itemDefinition, type ItemId } from './Item';
 
 export const HOTBAR_SIZE = 9;
-const MAX_DISTINCT_ITEMS = 64;
+const MAX_DISTINCT_ITEMS = 192;
 const MAX_SAVED_COUNT = 9999;
 
 export interface InventorySnapshot {
