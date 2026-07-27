@@ -80,6 +80,9 @@ class StubInput implements InputSource {
   reset(): void {
     this.resets++;
   }
+  requestCapture(): void {
+    this.isCaptured = true;
+  }
   onCaptureChange(): () => void {
     return () => {};
   }

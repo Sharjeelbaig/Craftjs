@@ -112,7 +112,7 @@ export class Hud {
     this.worldTimer = globalThis.setInterval(() => this.setWorldStatus(game.worldStatus()), 1000);
   }
 
-  /** Shows the click-to-play overlay when input capture is lost. */
+  /** Shows the Minecraft-style pause menu when input capture is lost. */
   setPaused(paused: boolean): void {
     this.paused = paused;
     // The death screen owns the view while it is up.
@@ -469,30 +469,94 @@ export class Hud {
   private createPauseOverlay(): HTMLElement {
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
-    overlay.innerHTML = `
-      <div class="overlay__panel">
-        <h1 class="overlay__title">Craft<span>js</span></h1>
-        <p class="overlay__hint">Click anywhere to resume</p>
-        <dl class="controls">
-          <div><dt>Move</dt><dd>W A S D</dd></div>
-          <div><dt>Jump / Ascend</dt><dd>Space</dd></div>
-          <div><dt>Sneak / Descend</dt><dd>Shift</dd></div>
-          <div><dt>Sprint</dt><dd>Ctrl</dd></div>
-          <div><dt>Mine / Attack</dt><dd>Hold left click</dd></div>
-          <div><dt>Place / Use</dt><dd>Right click</dd></div>
-          <div><dt>Ride horse or cart</dt><dd>Right click <span class="muted">(saddle for a horse)</span></dd></div>
-          <div><dt>Dismount</dt><dd>Shift</dd></div>
-          <div><dt>Sleep</dt><dd>Right click a bed <span class="muted">(night or storm)</span></dd></div>
-          <div><dt>Select block</dt><dd>1 – 9 / Scroll</dd></div>
-          <div><dt>Inventory / Crafting</dt><dd>E</dd></div>
-          <div><dt>Survival / Creative</dt><dd>G</dd></div>
-          <div><dt>Toggle flight</dt><dd>F <span class="muted">(creative)</span></dd></div>
-          <div><dt>Debug info</dt><dd>F3</dd></div>
-          <div><dt>Pause</dt><dd>Esc</dd></div>
-        </dl>
-      </div>
+
+    // Main pause menu view
+    const menuPanel = document.createElement('div');
+    menuPanel.className = 'pause-menu';
+
+    const title = document.createElement('h1');
+    title.className = 'pause-menu__title';
+    title.innerHTML = 'Craft<span>js</span>';
+
+    const resumeBtn = document.createElement('button');
+    resumeBtn.className = 'pause-menu__button';
+    resumeBtn.textContent = 'Resume';
+    resumeBtn.addEventListener('click', () => this.handleResume());
+
+    const settingsBtn = document.createElement('button');
+    settingsBtn.className = 'pause-menu__button';
+    settingsBtn.textContent = 'Settings';
+    settingsBtn.addEventListener('click', () => this.showSettings());
+
+    const exitBtn = document.createElement('button');
+    exitBtn.className = 'pause-menu__button';
+    exitBtn.textContent = 'Exit';
+    exitBtn.addEventListener('click', () => this.handleExit());
+
+    menuPanel.append(title, resumeBtn, settingsBtn, exitBtn);
+
+    // Settings sub-view (hidden by default)
+    const settingsPanel = document.createElement('div');
+    settingsPanel.className = 'pause-menu pause-menu--settings is-hidden';
+
+    const settingsTitle = document.createElement('h2');
+    settingsTitle.className = 'pause-menu__title';
+    settingsTitle.textContent = 'Controls';
+
+    const controlsList = document.createElement('dl');
+    controlsList.className = 'controls';
+    controlsList.innerHTML = `
+      <div><dt>Move</dt><dd>W A S D</dd></div>
+      <div><dt>Jump / Ascend</dt><dd>Space</dd></div>
+      <div><dt>Sneak / Descend</dt><dd>Shift</dd></div>
+      <div><dt>Sprint</dt><dd>Ctrl</dd></div>
+      <div><dt>Mine / Attack</dt><dd>Hold left click</dd></div>
+      <div><dt>Place / Use</dt><dd>Right click</dd></div>
+      <div><dt>Ride horse or cart</dt><dd>Right click <span class="muted">(saddle for a horse)</span></dd></div>
+      <div><dt>Dismount</dt><dd>Shift</dd></div>
+      <div><dt>Sleep</dt><dd>Right click a bed <span class="muted">(night or storm)</span></dd></div>
+      <div><dt>Select block</dt><dd>1 – 9 / Scroll</dd></div>
+      <div><dt>Inventory / Crafting</dt><dd>E</dd></div>
+      <div><dt>Survival / Creative</dt><dd>G</dd></div>
+      <div><dt>Toggle flight</dt><dd>F <span class="muted">(creative)</span></dd></div>
+      <div><dt>Debug info</dt><dd>F3</dd></div>
     `;
+
+    const backBtn = document.createElement('button');
+    backBtn.className = 'pause-menu__button';
+    backBtn.textContent = 'Back';
+    backBtn.addEventListener('click', () => this.hideSettings());
+
+    settingsPanel.append(settingsTitle, controlsList, backBtn);
+
+    overlay.append(menuPanel, settingsPanel);
     return overlay;
+  }
+
+  /** Re-acquires pointer lock to resume gameplay. */
+  private handleResume(): void {
+    this.game.requestPointerLock();
+  }
+
+  /** Shows the settings/controls sub-view. */
+  private showSettings(): void {
+    const menu = this.overlay.querySelector<HTMLElement>('.pause-menu');
+    const settings = this.overlay.querySelector<HTMLElement>('.pause-menu--settings');
+    menu?.classList.add('is-hidden');
+    settings?.classList.remove('is-hidden');
+  }
+
+  /** Returns to the main pause menu. */
+  private hideSettings(): void {
+    const menu = this.overlay.querySelector<HTMLElement>('.pause-menu');
+    const settings = this.overlay.querySelector<HTMLElement>('.pause-menu--settings');
+    menu?.classList.remove('is-hidden');
+    settings?.classList.add('is-hidden');
+  }
+
+  /** Exits to the main menu. */
+  private handleExit(): void {
+    this.game.exitToTitle();
   }
 
   private createDeathOverlay(): HTMLElement {

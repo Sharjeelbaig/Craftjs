@@ -227,6 +227,7 @@ async function bootstrap(): Promise<void> {
   game.onSlotChange((slot) => input.syncSlot(slot));
   game.onInventoryToggle((open) => {
     if (open) input.releaseCapture();
+    else input.requestCapture();
   });
 
   if (!durable) {

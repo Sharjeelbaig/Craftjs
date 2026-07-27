@@ -58,6 +58,9 @@ export interface InputSource {
   /** Consumes a hotbar slot selection, or null when unchanged. */
   consumeSlotSelection(): number | null;
 
+  /** Requests exclusive pointer capture (pointer lock). */
+  requestCapture(): void;
+
   /** Drops all pending state — used when focus or pointer lock is lost. */
   reset(): void;
 

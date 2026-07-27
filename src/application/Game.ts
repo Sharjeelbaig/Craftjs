@@ -330,6 +330,16 @@ export class Game {
     return this.entities.count;
   }
 
+  /** Re-acquires pointer lock so the player can resume playing. */
+  requestPointerLock(): void {
+    this.input.requestCapture();
+  }
+
+  /** Triggers the exit flow: saves, disposes, and returns to the title screen. */
+  exitToTitle(): void {
+    for (const listener of this.exitListeners) listener();
+  }
+
   onDebugToggle(listener: (visible: boolean) => void): () => void {
     this.debugListeners.add(listener);
     return () => this.debugListeners.delete(listener);
